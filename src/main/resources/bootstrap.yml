@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: anime-community
+  cloud:
+    nacos:
+      config:
+        server-addr: localhost:8848  # 你的 Nacos 地址
+        file-extension: yaml
+        namespace:
+      discovery:
+        server-addr: localhost:8848
+  profiles:
+    active: dev
