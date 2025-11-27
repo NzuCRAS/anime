@@ -1,0 +1,40 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: anime-test
+  main:
+    web-application-type: servlet
+
+  cloud:
+    compatibility-verifier:
+      enabled: false
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+
+  docker:
+    compose:
+      enabled: false
+
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis. RedisAutoConfiguration
+      - org. springframework.boot.docker.compose. core.DockerComposeAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.servlet. SecurityAutoConfiguration
+      - org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration
+
+# 禁用Actuator（如果不需要监控端点）
+management:
+  endpoints:
+    enabled-by-default: false
+
+logging:
+  level:
+    root: WARN
+    com. anime: DEBUG
+    com.alibaba.nacos: OFF

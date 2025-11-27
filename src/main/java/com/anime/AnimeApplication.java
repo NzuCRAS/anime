@@ -1,4 +1,4 @@
-package com.animecommunity;
+package com.anime;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

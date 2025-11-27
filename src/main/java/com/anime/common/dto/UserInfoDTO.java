@@ -1,4 +1,4 @@
-package com.animecommunity.common.dto;
+package com.anime.common.dto;
 
 import lombok.Data;
 import java.time.LocalDateTime;

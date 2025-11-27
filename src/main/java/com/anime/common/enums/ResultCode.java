@@ -1,4 +1,4 @@
-package com.animecommunity.common.enums;
+package com.anime.common.enums;
 
 import lombok.Getter;
 
