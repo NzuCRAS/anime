@@ -1,4 +1,4 @@
-package com.animecommunity.common.result;
+package com.anime.common.result;
 
 import lombok.Data;
 
