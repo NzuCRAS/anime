@@ -20,4 +20,7 @@ public interface UserMapper extends BaseMapper<User> {
 
     @Update("UPDATE users SET last_login = NOW() WHERE id = #{userId}")
     int updateLastLogin(String userId);
+
+    @Select("SELECT username FROM users WHERE id = #{userId}")
+    String getUserNameById(Long userId);
 }

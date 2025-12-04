@@ -1,4 +1,4 @@
-package com.anime.test.controller;
+package controller;
 
 import com.anime.common.dto.UserLoginDTO;
 import com.anime.common.result.Result;

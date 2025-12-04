@@ -1,5 +1,3 @@
-package com.anime.test;
-
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot. autoconfigure.security.servlet.SecurityAutoConfiguration;
@@ -15,8 +13,6 @@ import java.util.Arrays;
         exclude = {
                 org.springframework.boot.autoconfigure. jdbc.DataSourceAutoConfiguration.class,
                 org.springframework.boot.autoconfigure.data.redis. RedisAutoConfiguration.class,
-                com.alibaba.cloud.nacos.NacosConfigAutoConfiguration. class,
-                com.alibaba.cloud.nacos.discovery. NacosDiscoveryAutoConfiguration.class,
                 SecurityAutoConfiguration.class
         }
 )
