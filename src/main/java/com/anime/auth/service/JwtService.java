@@ -1,11 +1,12 @@
 package com.anime.auth.service;
 
-import com.anime.auth.config.JwtProperties;
+import com.anime.config.JwtProperties;
+import com.anime.user.service.UserService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework. stereotype.Service;
+import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
@@ -13,124 +14,202 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * 负责生成/解析/验证 JWT（access + refresh）
+ * 注意：
+ * - RefreshToken 的服务端旋转/存储由 RefreshTokenService (Redis) 协作实现
+ * - refreshAccessToken(...) 会校验 refreshToken 是否存在于 RefreshTokenService 中并执行旋转操作
+ */
 @Slf4j
 @Service
 public class JwtService {
 
     private final JwtProperties jwtProperties;
+    private final SecretKey secretKey;
+    private final RefreshTokenService refreshTokenService;
+    private final UserService userService;
 
-    public JwtService(JwtProperties jwtProperties) {
+    public JwtService(JwtProperties jwtProperties,
+                      RefreshTokenService refreshTokenService,
+                      UserService userService) {
         this.jwtProperties = jwtProperties;
+        this.secretKey = Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes());
+        this.refreshTokenService = refreshTokenService;
+        this.userService = userService;
     }
 
-    /**
-     * 生成AccessToken
-     */
+    public long getAccessExpirationMillis() {
+        return jwtProperties.getAccessToken().getExpiration();
+    }
+
+    public long getRefreshExpirationMillis() {
+        return jwtProperties.getRefreshToken().getExpiration();
+    }
+
     public String generateAccessToken(Long userId, String userName) {
         return generateAccessToken(userId, userName, null);
     }
 
-    /**
-     * 生成AccessToken（支持自定义过期时间）
-     */
-    public String generateAccessToken(Long userId, String userName, Long customExpiration) {
-        try {
-            // 参数验证
-            if (userId == null || userName == null || userName.trim().isEmpty()) {
-                throw new IllegalArgumentException("用户ID和用户名不能为空");
-            }
-
-            // 使用自定义过期时间或默认配置
-            long expiration = customExpiration != null ? customExpiration :
-                    jwtProperties.getAccessToken(). getExpiration();
-            String secret = jwtProperties.getSecret();
-            String issuer = jwtProperties.getIssuer();
-
-            // 构建Claims
-            Map<String, Object> claims = new HashMap<>();
-            claims.put("userId", userId);
-            claims.put("username", userName.trim());
-            claims.put("tokenType", "access");
-
-            // 从配置中获取密钥
-            SecretKey key = Keys.hmacShaKeyFor(secret.getBytes());
-
-            String token = Jwts.builder()
-                    .claims(claims)
-                    .issuer(issuer)
-                    .issuedAt(new Date())
-                    .expiration(new Date(System.currentTimeMillis() + expiration))
-                    .id(UUID.randomUUID().toString())
-                    .signWith(key)
-                    .compact();
-
-            log.debug("为用户 {} 生成AccessToken成功", userName);
-            return token;
-
-        } catch (Exception e) {
-            log.error("为用户 {} 生成AccessToken失败: {}", userName, e.getMessage());
-            throw new RuntimeException("生成AccessToken失败", e);
+    public String generateAccessToken(Long userId, String userName, Long customExpirationMillis) {
+        if (userId == null || userName == null || userName.trim().isEmpty()) {
+            throw new IllegalArgumentException("userId and userName must not be null/empty");
         }
+
+        long exp = customExpirationMillis != null ? customExpirationMillis : getAccessExpirationMillis();
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("username", userName.trim());
+        claims.put("tokenType", "access");
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setIssuer(jwtProperties.getIssuer())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + exp))
+                .setId(UUID.randomUUID().toString())
+                .signWith(secretKey)
+                .compact();
+    }
+
+    public String generateRefreshToken(Long userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null");
+        }
+
+        long exp = getRefreshExpirationMillis();
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("tokenType", "refresh");
+
+        return Jwts.builder()
+                .setClaims(claims)
+                .setIssuer(jwtProperties.getIssuer())
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + exp))
+                .setId(UUID.randomUUID().toString())
+                .signWith(secretKey)
+                .compact();
     }
 
     /**
-     * 解析Token获取Claims
+     * 解析并返回 Claims（使用 jjwt parser）
      */
     public Claims parseToken(String token) {
         try {
-            SecretKey key = Keys.hmacShaKeyFor(jwtProperties.getSecret(). getBytes());
-
             return Jwts.parser()
-                    .verifyWith(key)
+                    .verifyWith(secretKey)
                     .build()
-                    . parseSignedClaims(token)
+                    .parseSignedClaims(token)
                     .getPayload();
         } catch (Exception e) {
-            log.error("解析Token失败: {}", e.getMessage());
-            throw new RuntimeException("Token解析失败", e);
+            log.debug("parseToken failed: {}", e.getMessage());
+            throw new RuntimeException("Token parse failed", e);
         }
     }
 
-    /**
-     * 验证Token是否有效
-     */
     public boolean validateToken(String token) {
         try {
-            Claims claims = parseToken(token);
-            return !claims.getExpiration().before(new Date());
+            Claims c = parseToken(token);
+            return c.getExpiration() != null && !c.getExpiration().before(new Date());
         } catch (Exception e) {
-            log.debug("Token验证失败: {}", e.getMessage());
+            log.debug("validateToken: {}", e.getMessage());
             return false;
         }
     }
 
-    /**
-     * 从Token中提取用户ID
-     */
+    public boolean isAccessToken(String token) {
+        try {
+            Claims c = parseToken(token);
+            return "access".equals(c.get("tokenType", String.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public boolean isRefreshToken(String token) {
+        try {
+            Claims c = parseToken(token);
+            return "refresh".equals(c.get("tokenType", String.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public Long extractUserId(String token) {
-        Claims claims = parseToken(token);
-        return claims.get("userId", Long.class);
+        Claims c = parseToken(token);
+        Number n = c.get("userId", Number.class);
+        return n == null ? null : n.longValue();
     }
 
-    /**
-     * 从Token中提取用户名
-     */
+    public String extractJti(String token) {
+        Claims c = parseToken(token);
+        return c.getId();
+    }
+
     public String extractUsername(String token) {
-        Claims claims = parseToken(token);
-        return claims.get("username", String.class);
+        Claims c = parseToken(token);
+        return c.get("username", String.class);
     }
 
     /**
-     * 生成RefreshToken
+     * 生成新的 access+refresh pair（不做 Redis 旋转操作）
      */
-    public String generateRefreshToken(Long userId) {
-        // RefreshToken通常有更长的有效期
+    public TokenPair createTokenPair(Long userId, String username) {
+        String newAccess = generateAccessToken(userId, username);
+        String newRefresh = generateRefreshToken(userId);
+        return new TokenPair(newAccess, newRefresh);
     }
 
     /**
-     * 刷新AccessToken
+     * 使用 refreshToken 刷新并返回新的 TokenPair（包含 access + refresh）
+     *
+     * 流程：
+     * 1) 验证 refreshToken 的签名/过期/type
+     * 2) 检查 refresh 的 jti 是否在 RefreshTokenService（Redis）中有效
+     * 3) 生成新 pair，并让 RefreshTokenService 旋转（删除旧 jti，写入新 jti）
+     *
+     * 注意：RefreshTokenService.rotateRefreshToken 的原子性依赖调用者 / Redis 实现（如需严格并发保证，可使用 Lua 脚本）
      */
-    public String refreshAccessToken(String refreshToken) {
-        // 验证RefreshToken并生成新的AccessToken
+    public TokenPair refreshAccessToken(String refreshToken) {
+        if (refreshToken == null) {
+            throw new IllegalArgumentException("refreshToken is null");
+        }
+
+        // 1. 基础验证
+        if (!validateToken(refreshToken) || !isRefreshToken(refreshToken)) {
+            throw new IllegalArgumentException("Invalid or expired refresh token");
+        }
+
+        // 2. 检查 jti 在 Redis 中是否存在（未被撤销）
+        String oldJti = extractJti(refreshToken);
+        if (!refreshTokenService.validateRefreshToken(oldJti)) {
+            throw new IllegalArgumentException("Refresh token is not valid (not found or revoked)");
+        }
+
+        // 3. 获取 userId 与 username
+        Long userId = extractUserId(refreshToken);
+        if (userId == null) {
+            throw new IllegalArgumentException("Invalid refresh token payload: missing userId");
+        }
+        String username = userService.getUsernameById(userId);
+        if (username == null) {
+            throw new IllegalArgumentException("User not found for id: " + userId);
+        }
+
+        // 4. 生成新对 token
+        TokenPair newPair = createTokenPair(userId, username);
+        String newJti = extractJti(newPair.refreshToken);
+
+        // 5. 在 Redis 中旋转（删除旧 jti，写入新 jti）
+        boolean rotated = refreshTokenService.rotateRefreshTokenAtomic(oldJti, newJti, userId, getRefreshExpirationMillis());
+        if (!rotated) {
+            throw new IllegalArgumentException("Refresh token rotation failed (may be replay or revoked)");
+        }
+        log.debug("refreshAccessToken: rotated refresh jti {} -> {}", oldJti, newJti);
+        return newPair;
     }
+
+    public record TokenPair(String accessToken, String refreshToken) {}
 }

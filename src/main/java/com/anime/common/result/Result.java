@@ -42,7 +42,7 @@ public class Result<T> {
         return new Result<>(ResultCode.SUCCESS, data, true);
     }
 
-    public static <T> Result<T> fail(ResultCode resultCode) {
-        return new Result<>(resultCode, null, false);
+    public static <T> Result<T> fail(ResultCode resultCode, T data) {
+        return new Result<>(resultCode, data, false);
     }
 }

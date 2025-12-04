@@ -1,0 +1,25 @@
+services:
+  redis:
+    container_name: redis
+    image: redis:7.2-alpine
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis/conf/redis.conf:/etc/redis/redis.conf
+      - ./redis/data:/data
+      - ./redis/logs:/var/log/redis
+    command: redis-server /etc/redis/redis.conf
+    networks:
+      - anime-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  anime-network:
+    driver: bridge

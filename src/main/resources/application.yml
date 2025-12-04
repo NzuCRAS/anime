@@ -2,12 +2,10 @@ server:
   port: 8080
 
 spring:
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    # 数据库连接信息从 Nacos 获取
-  jpa:
-    hibernate:
-      ddl-auto: update
-    show-sql: true
-  redis:
-  # Redis 配置从 Nacos 获取
+  profiles:
+    active: dev
+  docker:
+    compose:
+          enabled: false
+
+# 统一把 dev 配置放到 application-dev.yml

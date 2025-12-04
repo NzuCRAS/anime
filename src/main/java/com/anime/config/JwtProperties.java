@@ -1,4 +1,4 @@
-package com.anime.auth.config;
+package com.anime.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

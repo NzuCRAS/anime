@@ -19,8 +19,8 @@ public class User {
     /**
      * 用户UUID主键
      */
-    @TableId(value = "id", type = IdType.ASSIGN_UUID)  // UUID 主键
-    private String id;
+    @TableId(value = "id", type = IdType.AUTO)  // UUID 主键
+    private Long id;
 
     /**
      * 用户名
