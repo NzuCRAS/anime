@@ -109,6 +109,10 @@ public class JwtService {
         }
     }
 
+    /**
+     * 验证 token 的有效性（签名 + 过期）
+     * @param token
+     */
     public boolean validateToken(String token) {
         try {
             Claims c = parseToken(token);
@@ -137,17 +141,32 @@ public class JwtService {
         }
     }
 
+    /**
+     * 从 token 中提取 userId
+     * @param token
+     * @return
+     */
     public Long extractUserId(String token) {
         Claims c = parseToken(token);
         Number n = c.get("userId", Number.class);
         return n == null ? null : n.longValue();
     }
 
+    /**
+     * 从 token 中提取 jti
+     * @param token
+     * @return
+     */
     public String extractJti(String token) {
         Claims c = parseToken(token);
         return c.getId();
     }
 
+    /**
+     * 从 token 中提取 username
+     * @param token
+     * @return
+     */
     public String extractUsername(String token) {
         Claims c = parseToken(token);
         return c.get("username", String.class);

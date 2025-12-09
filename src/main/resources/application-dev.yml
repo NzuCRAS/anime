@@ -16,6 +16,16 @@ spring:
     port: 6379
     database: 0
 
+    # Storage configuration - local MinIO for development
+    storage:
+      provider: s3
+      bucket: test-bucket
+      region: us-east-1
+      endpoint: http://host.docker.internal:9000
+      access-key: minioadmin
+      secret-key: minioadmin
+      cdn-domain: ""   # optional, set to CloudFront domain in prod
+
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

@@ -40,8 +40,8 @@ public class User {
     /**
      * 头像图片路径
      */
-    @TableField("avatar_path")  // 字段映射
-    private String avatarPath;
+    @TableField("avatar_attachment_id")  // 字段映射
+    private String avatar_attachment_id;
 
     /**
      * 创建时间
