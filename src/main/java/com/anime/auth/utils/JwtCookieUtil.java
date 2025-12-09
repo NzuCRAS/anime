@@ -6,52 +6,37 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 
 /**
- * 辅助方法：把 token 写进 HttpOnly cookie / 清除 cookie
- * 注意：生产环境请把 secure=true，并根据域名/路径做好配置
+ * 仅设置 refresh token cookie（HttpOnly），不再把 accessToken 写入 HttpOnly cookie。
+ * 前端应在 refresh 返回的 JSON 中取到 access token 并把它放到内存中（传递 Authorization header）。
  */
 public class JwtCookieUtil {
 
-    public static void writeTokenCookies(HttpServletResponse response, JwtService.TokenPair tokens, JwtService jwtService) {
-        long accessMaxAgeSec = Math.max(1, jwtService.getAccessExpirationMillis() / 1000);
+    public static void writeRefreshCookie(HttpServletResponse response, String refreshToken, JwtService jwtService) {
         long refreshMaxAgeSec = Math.max(1, jwtService.getRefreshExpirationMillis() / 1000);
 
-        ResponseCookie accessCookie = ResponseCookie.from("accessToken", tokens.accessToken())
+        // Compose Set-Cookie header with SameSite=Lax (or Strict depending on requirements)
+        // 使用 ResponseCookie 构造后再通过 header 写入，确保 SameSite 被写入
+        String setCookieHeader = ResponseCookie.from("refreshToken", refreshToken)
                 .httpOnly(true)
-                .secure(false) // 生产环境请改为 true
-                .path("/")
-                .maxAge(accessMaxAgeSec)
-                .sameSite("Lax")
-                .build();
-
-        ResponseCookie refreshCookie = ResponseCookie.from("refreshToken", tokens.refreshToken())
-                .httpOnly(true)
-                .secure(false) // 生产环境请改为 true
+                .secure(true) // production: true
                 .path("/")
                 .maxAge(refreshMaxAgeSec)
                 .sameSite("Lax")
-                .build();
+                .build()
+                .toString();
 
-        response.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
-        response.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE, setCookieHeader);
     }
 
-    public static void clearTokenCookies(HttpServletResponse response) {
-        ResponseCookie clearAccess = ResponseCookie.from("accessToken", "")
+    public static void clearRefreshCookie(HttpServletResponse response) {
+        String clearCookie = ResponseCookie.from("refreshToken", "")
                 .httpOnly(true)
-                .secure(false) // 生产环境请改为 true
+                .secure(true)
                 .path("/")
                 .maxAge(0)
                 .sameSite("Lax")
-                .build();
-        ResponseCookie clearRefresh = ResponseCookie.from("refreshToken", "")
-                .httpOnly(true)
-                .secure(false) // 生产环境请改为 true
-                .path("/")
-                .maxAge(0)
-                .sameSite("Lax")
-                .build();
-
-        response.addHeader(HttpHeaders.SET_COOKIE, clearAccess.toString());
-        response.addHeader(HttpHeaders.SET_COOKIE, clearRefresh.toString());
+                .build()
+                .toString();
+        response.addHeader(HttpHeaders.SET_COOKIE, clearCookie);
     }
 }

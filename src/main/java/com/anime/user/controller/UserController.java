@@ -69,7 +69,7 @@ public class UserController {
                 }
 
                 // 把新的 token 写入 HttpOnly cookie（refresh）并把 access 放 header
-                JwtCookieUtil.writeTokenCookies(response, newPair, jwtService);
+                JwtCookieUtil.writeRefreshCookie(response, newPair.refreshToken(), jwtService);
                 response.setHeader("New-Access-Token", newPair.accessToken());
 
                 userService.onLoginSuccess(userId);
@@ -95,7 +95,7 @@ public class UserController {
         refreshTokenService.storeRefreshToken(refreshJti, userId, jwtService.getRefreshExpirationMillis());
 
         // 将 token 写入 cookie，并把 access 放到响应 header 供前端立即同步
-        JwtCookieUtil.writeTokenCookies(response, pair, jwtService);
+        JwtCookieUtil.writeRefreshCookie(response, pair.refreshToken(), jwtService);
         response.setHeader("New-Access-Token", pair.accessToken());
 
         userService.onLoginSuccess(userId);
@@ -121,7 +121,7 @@ public class UserController {
             var pair = jwtService.createTokenPair(userId, username);
             String refreshJti = jwtService.extractJti(pair.refreshToken());
             refreshTokenService.storeRefreshToken(refreshJti, userId, jwtService.getRefreshExpirationMillis());
-            JwtCookieUtil.writeTokenCookies(response, pair, jwtService);
+            JwtCookieUtil.writeRefreshCookie(response, pair.refreshToken(), jwtService);
 
             // 把 access 暴露到 header 供前端立即使用
             response.setHeader("New-Access-Token", pair.accessToken());
@@ -144,7 +144,7 @@ public class UserController {
                 refreshTokenService.revokeRefreshToken(jti);
             } catch (Exception ignored) {}
         }
-        JwtCookieUtil.clearTokenCookies(response);
+        JwtCookieUtil.clearRefreshCookie(response);
         return ResponseEntity.ok(Result.success("已登出"));
     }
 
