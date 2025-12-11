@@ -35,7 +35,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/user/login", "/api/user/register", "/api/auth/refresh")
                         .permitAll()
-                        .requestMatchers("/public/**", "/static/**", "/api/test/**", "/api/user/ping").permitAll()
+                        .requestMatchers("/public/**", "/static/**", "/api/test/**", "/api/user/ping","/api/attachments/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));

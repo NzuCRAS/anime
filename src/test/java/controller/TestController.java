@@ -1,6 +1,6 @@
 package controller;
 
-import com.anime.common.dto.UserLoginDTO;
+import com.anime.common.dto.user.UserLoginDTO;
 import com.anime.common.result.Result;
 import org.springframework.web.bind.annotation.*;
 

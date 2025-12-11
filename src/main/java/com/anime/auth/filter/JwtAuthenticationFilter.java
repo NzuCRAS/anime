@@ -36,6 +36,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/user/register",
             "/api/user/ping",
             "/api/auth/refresh",
+            "/api/attachments/presign",
+            "/api/attachments/complete",
             "/api/test/",
             "/public/",
             "/static/",

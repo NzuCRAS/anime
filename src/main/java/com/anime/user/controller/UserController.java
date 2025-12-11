@@ -3,8 +3,8 @@ package com.anime.user.controller;
 import com.anime.auth.service.JwtService;
 import com.anime.auth.service.RefreshTokenService;
 import com.anime.auth.utils.JwtCookieUtil;
-import com.anime.common.dto.UserLoginDTO;
-import com.anime.common.dto.UserRegisterDTO;
+import com.anime.common.dto.user.UserLoginDTO;
+import com.anime.common.dto.user.UserRegisterDTO;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
 import com.anime.user.service.UserService;
@@ -65,7 +65,7 @@ public class UserController {
                 boolean rotated = refreshTokenService.rotateRefreshTokenAtomic(oldJti, newRefreshJti, userId, jwtService.getRefreshExpirationMillis());
                 if (!rotated) {
                     // 旋转失败，要求重新登录
-                    return ResponseEntity.status(401).body(Result.fail(ResultCode.UNAUTHORIZED, "Refresh token 无效或已被使用"));
+                    return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(Result.fail(ResultCode.UNAUTHORIZED, "Refresh token 无效或已被使用"));
                 }
 
                 // 把新的 token 写入 HttpOnly cookie（refresh）并把 access 放 header
@@ -84,7 +84,7 @@ public class UserController {
 
         Long userId = userService.authenticateAndGetId(loginDTO.getUsernameOrEmail(), loginDTO.getPassword());
         if (userId == null) {
-            return ResponseEntity.status(401).body(Result.fail(ResultCode.UNAUTHORIZED, "凭证无效，登录失败"));
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(Result.fail(ResultCode.UNAUTHORIZED, "凭证无效，登录失败"));
         }
 
         String username = userService.getUsernameById(userId);
@@ -131,7 +131,7 @@ public class UserController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, e.getMessage()));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Result.fail(ResultCode.SYSTEM_ERROR, "注册失败"));
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, "注册失败"));
         }
     }
 

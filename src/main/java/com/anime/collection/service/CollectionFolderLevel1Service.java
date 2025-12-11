@@ -1,9 +1,10 @@
 package com.anime.collection.service;
 
-import com.anime.common.entity.CollectionFolderLevel1;
-import com.anime.common.mapper.CollectionFolderLevel1Mapper;
+import com.anime.common.entity.collection.CollectionFolderLevel1;
+import com.anime.common.mapper.collection.CollectionFolderLevel1Mapper;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -15,29 +16,48 @@ public class CollectionFolderLevel1Service {
         this.collectionFolderLevel1Mapper = collectionFolderLevel1Mapper;
     }
 
-
     //判断有无默认收藏夹
     public List<CollectionFolderLevel1> getCollectionFolderLevel1ByName() {
         return collectionFolderLevel1Mapper.getCollectionFolderLevel1ByName();
     }
-    //新建新的收藏夹（给我附件id，用户id）
+    //新建新的收藏夹（给我用户id）
     public boolean createNewFolder(Long user_id) {
+        if(user_id == null){
+            return false;
+        }
         return collectionFolderLevel1Mapper.createCollectionFolderLevel1(user_id);
     }
 
     //查询所有收藏夹（给我用户id）
     public List<CollectionFolderLevel1> getCollectionFolderLevel1(Long user_id) {
+        if(user_id == null){
+            return new ArrayList<>();
+        }
         return collectionFolderLevel1Mapper.findByUserId(user_id);
     }
 
     //更新收藏夹名（给我新名字，被修改的收藏夹id）
     public boolean UpdateName(String new_name, Long level1_id) {
+        if(level1_id == null){
+            return false;
+        }
         return collectionFolderLevel1Mapper.updateCollectionFolderName(new_name,level1_id);
     }
 
     //更新收藏夹封面（给我新封面附件id，被修改的收藏夹id）
     public boolean UpdateCover(Long new_attachment_id, Long level1_id) {
+        if(level1_id == null){
+            return false;
+        }
         return collectionFolderLevel1Mapper.updateCollectionFolderPath(new_attachment_id,level1_id);
+    }
+
+    //删除收藏夹，给我一级收藏夹id
+    public boolean DeleteCollectionFolderLevel1(Long level1_id) {
+        if(level1_id == null){
+            return false;
+        }
+        return collectionFolderLevel1Mapper.deleteCollectionFolderLevel1(level1_id);
     }
 
 

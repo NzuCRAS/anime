@@ -1,4 +1,4 @@
-package com.anime.common.entity;
+package com.anime.common.entity.user;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;

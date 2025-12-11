@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Attachment Upload Test (multi-type)</title>
+    <style>
+        body { font-family: Arial, Helvetica, sans-serif; max-width: 920px; margin: 24px auto; padding: 0 16px; color: #222; }
+        h1 { font-size: 20px; margin-bottom: 8px; }
+        .panel { border: 1px solid #e0e0e0; padding: 12px; border-radius: 6px; margin-bottom: 12px; background: #fafafa; }
+        .row { display:flex; gap:12px; align-items:center; margin-bottom:8px; }
+        label { min-width: 120px; font-weight: 600; }
+        input[type="file"] { flex:1; }
+        button { padding: 8px 12px; cursor: pointer; }
+        .preview { max-width: 100%; margin-top: 12px; border: 1px solid #ddd; padding: 8px; background: #fff; }
+        .log { font-family: monospace; background:#111; color:#eee; padding:8px; border-radius:6px; max-height:240px; overflow:auto; font-size:12px; }
+        progress { width:100%; height:14px; }
+        .success { color: #117a37; }
+        .error { color: #b00020; }
+        a.link { word-break: break-all; }
+        video, audio { max-width: 100%; display:block; margin-top:8px; }
+    </style>
+</head>
+<body>
+<h1>Attachment Upload - Frontend Smoke Test (multi-type)</h1>
+<p>选择任意文件（图片、视频、音频、文档）进行上传测试。注意：视频/大文件推荐使用 multipart 上传流程（本示例为简单单 PUT 演示）。</p>
+
+<div class="panel">
+    <div class="row">
+        <label for="storagePath">storagePath (业务前缀)</label>
+        <input id="storagePath" type="text" value="diary/user_1/diary_1" style="flex:1;" />
+    </div>
+
+    <div class="row">
+        <label for="file">Choose file</label>
+        <input id="file" type="file" accept="*/*" />
+    </div>
+
+    <div class="row">
+        <label for="uploadedBy">uploadedBy (demo)</label>
+        <input id="uploadedBy" type="number" value="1" style="width:100px;" />
+        <label style="min-width:70px;"> </label>
+        <button id="btnUpload">Upload</button>
+    </div>
+
+    <div id="progressWrap" style="display:none; margin-top:8px;">
+        <label>Upload progress</label>
+        <progress id="progress" value="0" max="100"></progress>
+    </div>
+</div>
+
+<div class="panel">
+    <div><strong>Local preview</strong></div>
+    <div id="localPreviewWrap" class="preview" style="display:none; max-height:480px; overflow:auto;"></div>
+</div>
+
+<div class="panel">
+    <div><strong>Server / Presign response</strong></div>
+    <pre id="presignResp" class="log"></pre>
+</div>
+
+<div class="panel">
+    <div><strong>Complete response (Attachment)</strong></div>
+    <pre id="completeResp" class="log"></pre>
+    <div id="displayArea" style="margin-top:10px;"></div>
+</div>
+
+<script>
+    const BACKEND = 'http://localhost:8080';
+
+    const fileInput = document.getElementById('file');
+    const localPreviewWrap = document.getElementById('localPreviewWrap');
+    const btnUpload = document.getElementById('btnUpload');
+    const presignRespEl = document.getElementById('presignResp');
+    const completeRespEl = document.getElementById('completeResp');
+    const progressWrap = document.getElementById('progressWrap');
+    const progressEl = document.getElementById('progress');
+    const displayArea = document.getElementById('displayArea');
+    const uploadedByInput = document.getElementById('uploadedBy');
+    const storagePathInput = document.getElementById('storagePath');
+
+    function clearLocalPreview() {
+        localPreviewWrap.innerHTML = '';
+        localPreviewWrap.style.display = 'none';
+    }
+
+    fileInput.addEventListener('change', () => {
+        clearLocalPreview();
+        const f = fileInput.files[0];
+        if (!f) return;
+        localPreviewWrap.style.display = 'block';
+        const url = URL.createObjectURL(f);
+
+        if (f.type.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = 'local image preview';
+            img.style.maxHeight = '420px';
+            img.className = 'preview';
+            localPreviewWrap.appendChild(img);
+        } else if (f.type.startsWith('video/')) {
+            const v = document.createElement('video');
+            v.src = url;
+            v.controls = true;
+            v.className = 'preview';
+            localPreviewWrap.appendChild(v);
+        } else if (f.type.startsWith('audio/')) {
+            const a = document.createElement('audio');
+            a.src = url;
+            a.controls = true;
+            a.className = 'preview';
+            localPreviewWrap.appendChild(a);
+        } else {
+            // generic file
+            const link = document.createElement('a');
+            link.href = url;
+            link.textContent = '本地文件预览 / 下载: ' + f.name;
+            link.target = '_blank';
+            link.className = 'link';
+            localPreviewWrap.appendChild(link);
+        }
+    });
+
+    btnUpload.addEventListener('click', async () => {
+        presignRespEl.textContent = '';
+        completeRespEl.textContent = '';
+        displayArea.innerHTML = '';
+
+        const file = fileInput.files[0];
+        if (!file) {
+            alert('Please select a file first.');
+            return;
+        }
+
+        const storagePath = (storagePathInput.value || '').trim();
+
+        btnUpload.disabled = true;
+        try {
+            // 1) Call presign
+            const presignReq = {
+                storagePath: storagePath,
+                originalFilename: file.name, // 用于 metadata，非 key
+                contentType: file.type || 'application/octet-stream',
+                uploadedBy: parseInt(uploadedByInput.value || '0') || 0
+            };
+
+            logPresign('Requesting presign...');
+            const presignResp = await fetch(BACKEND + '/api/attachments/presign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(presignReq)
+            }).then(r => {
+                if (!r.ok) throw new Error('presign request failed: ' + r.status + ' ' + r.statusText);
+                return r.json();
+            });
+
+            logPresign(JSON.stringify(presignResp, null, 2));
+
+            const putUrl = presignResp.putUrl || presignResp.puturl || presignResp.put_url;
+            const putHeaders = presignResp.putHeaders || presignResp.putheaders || presignResp.put_headers || {};
+
+            if (!putUrl) throw new Error('presign response does not include putUrl');
+
+            // 2) PUT file to presigned URL
+            logPresign('Uploading file to presigned URL...');
+            await putWithXHR(putUrl, putHeaders, file);
+
+            // 3) Notify backend complete
+            logComplete('Notifying server to complete upload (attachmentId=' + presignResp.attachmentId + ')');
+            const completeResp = await fetch(BACKEND + '/api/attachments/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ attachmentId: presignResp.attachmentId })
+            }).then(r => {
+                if (!r.ok) throw new Error('complete request failed: ' + r.status + ' ' + r.statusText);
+                return r.json();
+            });
+
+            logComplete(JSON.stringify(completeResp, null, 2));
+
+            // 4) 显示步骤：优先使用 attachment.url，否则请求 presigned-get
+            const att = completeResp;
+            const fileMime = presignReq.contentType;
+            if (att && att.url) {
+                showResource(att.url, fileMime);
+            } else {
+                try {
+                    const presignedResp = await fetch(BACKEND + '/api/attachments/' + presignResp.attachmentId + '/presigned-get?expiry=300', {
+                        method: 'GET'
+                    }).then(r => {
+                        if (!r.ok) throw new Error('get presigned-get failed: ' + r.status + ' ' + r.statusText);
+                        return r.json();
+                    });
+
+                    const getUrl = presignedResp.url;
+                    showResource(getUrl, fileMime);
+                } catch (e) {
+                    displayArea.innerHTML = '<div class="error">Cannot create display URL: ' + escapeHtml(e.message) + '</div>';
+                }
+            }
+
+        } catch (err) {
+            console.error(err);
+            presignRespEl.textContent += '\nError: ' + err.message;
+            alert('Upload failed: ' + err.message);
+        } finally {
+            btnUpload.disabled = false;
+            progressWrap.style.display = 'none';
+            progressEl.value = 0;
+        }
+    });
+
+    function showResource(url, mime) {
+        displayArea.innerHTML = '';
+        if (mime && mime.startsWith('image/')) {
+            displayArea.innerHTML = '<div><strong>Image (presigned GET):</strong></div>'
+                + '<img src="' + escapeHtml(url) + '" class="preview" alt="uploaded image" />';
+        } else if (mime && mime.startsWith('video/')) {
+            displayArea.innerHTML = '<div><strong>Video (presigned GET):</strong></div>'
+                + '<video controls src="' + escapeHtml(url) + '" class="preview"></video>';
+        } else if (mime && mime.startsWith('audio/')) {
+            displayArea.innerHTML = '<div><strong>Audio (presigned GET):</strong></div>'
+                + '<audio controls src="' + escapeHtml(url) + '" class="preview"></audio>';
+        } else {
+            displayArea.innerHTML = '<div><strong>File (presigned GET):</strong></div>'
+                + '<a class="link" href="' + escapeHtml(url) + '" target="_blank">' + escapeHtml(url) + '</a>';
+        }
+    }
+
+    function logPresign(s) {
+        presignRespEl.textContent += s + '\n';
+        presignRespEl.scrollTop = presignRespEl.scrollHeight;
+    }
+    function logComplete(s) {
+        completeRespEl.textContent += s + '\n';
+        completeRespEl.scrollTop = completeRespEl.scrollHeight;
+    }
+    function escapeHtml(s) {
+        return (s + '').replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[c]);
+    }
+
+    function putWithXHR(url, headersObj, file) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url, true);
+
+            // Set presigner indicated headers (except Host)
+            for (const k of Object.keys(headersObj || {})) {
+                if (k.toLowerCase() === 'host') continue;
+                try {
+                    xhr.setRequestHeader(k, headersObj[k]);
+                } catch (e) {
+                    console.warn('Failed to set header', k, e);
+                }
+            }
+
+            xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable) {
+                    const p = Math.round(ev.loaded / ev.total * 100);
+                    progressWrap.style.display = 'block';
+                    progressEl.value = p;
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve(xhr);
+                } else {
+                    reject(new Error('PUT failed: ' + xhr.status + ' ' + xhr.statusText + '\n' + xhr.responseText));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('Network error during PUT'));
+            xhr.ontimeout = () => reject(new Error('PUT timeout'));
+            xhr.send(file);
+        });
+    }
+</script>
+</body>
+</html>

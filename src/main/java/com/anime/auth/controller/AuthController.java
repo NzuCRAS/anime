@@ -6,11 +6,14 @@ import com.anime.common.result.Result;
 import com.anime.auth.utils.JwtCookieUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+
+import static com.anime.common.result.Result.fail;
 
 /**
  * refresh endpoint:
@@ -34,13 +37,13 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
-    public Result<Map<String, String>> refresh(HttpServletRequest request, HttpServletResponse response,
-                                               @RequestHeader(value = "Origin", required = false) String origin) {
+    public ResponseEntity<Result<Map<String, String>>> refresh(HttpServletRequest request, HttpServletResponse response,
+                                                               @RequestHeader(value = "Origin", required = false) String origin) {
         // Basic Origin check to reduce CSRF risk (production: read from config and validate)
         if (origin == null || !origin.equalsIgnoreCase(allowedOrigin)) {
             Map<String, String> result = new HashMap<>();
             result.put("message", "Invalid origin");
-            return Result.fail(ResultCode.UNAUTHORIZED, result);
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(fail(ResultCode.UNAUTHORIZED, result));
         }
 
         String refreshToken = null;
@@ -55,7 +58,7 @@ public class AuthController {
         if (refreshToken == null) {
             Map<String, String> result = new HashMap<>();
             result.put("message", "Refresh token missing");
-            return Result.fail(ResultCode.UNAUTHORIZED, result);
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(fail(ResultCode.UNAUTHORIZED, result));
         }
         try {
             var pair = jwtService.refreshAccessToken(refreshToken);
@@ -64,13 +67,13 @@ public class AuthController {
             // 返回新的 access token 到 body，前端将其存入内存（并在后续请求的 Authorization header 使用）
             Map<String, String> data = new HashMap<>();
             data.put("accessToken", pair.accessToken());
-            return Result.success(data);
+            return ResponseEntity.ok(Result.success(data));
         } catch (Exception e) {
             Map<String, String> result = new HashMap<>();
             result.put("message", "Refresh failed: " + e.getMessage());
             // 清除 cookie for safety
             JwtCookieUtil.clearRefreshCookie(response);
-            return Result.fail(ResultCode.UNAUTHORIZED, result);
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(fail(ResultCode.UNAUTHORIZED, result));
         }
     }
 }
