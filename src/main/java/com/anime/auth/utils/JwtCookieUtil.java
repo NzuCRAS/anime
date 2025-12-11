@@ -18,7 +18,7 @@ public class JwtCookieUtil {
         // 使用 ResponseCookie 构造后再通过 header 写入，确保 SameSite 被写入
         String setCookieHeader = ResponseCookie.from("refreshToken", refreshToken)
                 .httpOnly(true)
-                .secure(true) // production: true
+                .secure(true)
                 .path("/")
                 .maxAge(refreshMaxAgeSec)
                 .sameSite("Lax")

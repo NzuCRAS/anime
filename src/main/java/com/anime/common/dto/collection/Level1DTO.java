@@ -1,4 +1,4 @@
-package com.anime.common.dto;
+package com.anime.common.dto.collection;
 
 import lombok.Data;
 

@@ -1,7 +1,7 @@
 package com.anime.user.service;
 
-import com.anime.common.entity.User;
-import com.anime.common.mapper.UserMapper;
+import com.anime.common.entity.user.User;
+import com.anime.common.mapper.user.UserMapper;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 

@@ -1,6 +1,6 @@
-package com.anime.common.mapper;
+package com.anime.common.mapper.user;
 
-import com.anime.common.entity.User;
+import com.anime.common.entity.user.User;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Select;

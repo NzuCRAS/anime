@@ -2,8 +2,8 @@ package com.anime.collection.controller;
 
 import com.anime.auth.service.JwtService;
 import com.anime.collection.service.CollectionFolderLevel1Service;
-import com.anime.common.dto.Level1DTO;
-import com.anime.common.entity.CollectionFolderLevel1;
+import com.anime.common.dto.collection.Level1DTO;
+import com.anime.common.entity.collection.CollectionFolderLevel1;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,12 +41,12 @@ public class CollectionFolderLevel1Controller {
             // 1. 验证Token和获取用户ID
             String accessToken = extractAccessTokenFromRequest(request);
             if (accessToken == null || !jwtService.validateToken(accessToken)) {
-                return ResponseEntity.status(401).body(Result.String(ResultCode.UNAUTHORIZED, "未授权或Token无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"未授权或Token无效"));
             }
 
             Long userId = jwtService.extractUserId(accessToken);
             if (userId == null) {
-                return ResponseEntity.status(401).body(Result.String(ResultCode.UNAUTHORIZED, "用户ID无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"用户ID无效"));
             }
 
             // 2. 检查用户是否已经有默认收藏夹
@@ -55,7 +55,7 @@ public class CollectionFolderLevel1Controller {
 
             // 如果用户已有收藏夹，则不需要再创建默认收藏夹
             if (existingFolders != null && !existingFolders.isEmpty()) {
-                return ResponseEntity.ok(Result.success("用户已有收藏夹，无需重复创建"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"用户已有收藏夹，无需重复创建"));
             }
 
             // 3. 调用Service创建默认收藏夹
@@ -64,50 +64,35 @@ public class CollectionFolderLevel1Controller {
             if (created) {
                 return ResponseEntity.ok(Result.success("创建默认收藏夹成功"));
             } else {
-                return ResponseEntity.status(500).body(Result.String(ResultCode.SYSTEM_ERROR, "创建默认收藏夹失败"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"创建默认收藏夹失败"));
             }
 
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Result.String(ResultCode.SYSTEM_ERROR, "创建默认收藏夹失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"创建默认收藏夹失败：" + e.getMessage()));
         }
     }
 
-    /**
-     * 获取当前用户的所有一级收藏夹
-     */
+    /** * 获取当前用户的所有一级收藏夹 */
     @GetMapping("/getUserFolders")
     public ResponseEntity<Result<List<CollectionFolderLevel1>>> getUserFolders(HttpServletRequest request) {
         try {
             // 从请求中获取并验证Access Token
             String accessToken = extractAccessTokenFromRequest(request);
             if (accessToken == null || !jwtService.validateToken(accessToken)) {
-                return ResponseEntity.status(401).body(
-                        Result.<List<CollectionFolderLevel1>>String(ResultCode.UNAUTHORIZED, "未授权或Token无效")
-                );
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, null));
             }
-
             Long userId = jwtService.extractUserId(accessToken);
             if (userId == null) {
-                return ResponseEntity.status(401).body(
-                        Result.<List<CollectionFolderLevel1>>String(ResultCode.UNAUTHORIZED, "用户ID无效")
-                );
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, null));
             }
-
             List<CollectionFolderLevel1> folders = collectionFolderLevel1Service.getCollectionFolderLevel1(userId);
-
             // 如果获取不到文件链表或没有收藏夹，返回空列表而不是null
             if (folders == null) {
                 folders = new ArrayList<>();
             }
-
-            return ResponseEntity.ok(
-                    Result.success(folders)
-            );
-
+            return ResponseEntity.ok(Result.success(folders));
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(
-                    Result.<List<CollectionFolderLevel1>>String(ResultCode.SYSTEM_ERROR, "获取收藏夹失败: " + e.getMessage())
-            );
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR, null));
         }
     }
 
@@ -118,21 +103,21 @@ public class CollectionFolderLevel1Controller {
     public ResponseEntity<Result<String>> updateFolderName(@RequestBody Level1DTO level1DTO, HttpServletRequest request) {
         try {
             if (level1DTO.getId() == null || level1DTO.getId() <= 0) {
-                return ResponseEntity.badRequest().body(Result.String(ResultCode.BAD_REQUEST, "收藏夹ID无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST,"收藏夹ID无效"));
             }
 
             if (level1DTO == null || level1DTO.getName() == null || level1DTO.getName().trim().isEmpty()) {
-                return ResponseEntity.badRequest().body(Result.String(ResultCode.BAD_REQUEST, "新名称不能为空"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST,"新名称不能为空"));
             }
 
             String accessToken = extractAccessTokenFromRequest(request);
             if (accessToken == null || !jwtService.validateToken(accessToken)) {
-                return ResponseEntity.status(401).body(Result.String(ResultCode.UNAUTHORIZED, "未授权或Token无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"未授权或Token无效"));
             }
 
             Long userId = jwtService.extractUserId(accessToken);
             if (userId == null) {
-                return ResponseEntity.status(401).body(Result.String(ResultCode.UNAUTHORIZED, "用户ID无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"用户ID无效"));
             }
 
             boolean updated = collectionFolderLevel1Service.UpdateName(level1DTO.getName(), level1DTO.getId());
@@ -140,11 +125,11 @@ public class CollectionFolderLevel1Controller {
             if (updated) {
                 return ResponseEntity.ok(Result.success("更新收藏夹名称成功"));
             } else {
-                return ResponseEntity.status(500).body(Result.String(ResultCode.SYSTEM_ERROR, "更新收藏夹名称失败"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"更新收藏夹名称失败"));
             }
 
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Result.String(ResultCode.SYSTEM_ERROR, "更新收藏夹名称失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"更新收藏夹名称失败: " + e.getMessage()));
         }
     }
 
@@ -155,21 +140,21 @@ public class CollectionFolderLevel1Controller {
     public ResponseEntity<Result<String>> updateFolderCover(@RequestBody Level1DTO level1DTO, HttpServletRequest request) {
         try {
             if (level1DTO.getId() == null || level1DTO.getId() <= 0) {
-                return ResponseEntity.badRequest().body(Result.String(ResultCode.BAD_REQUEST, "收藏夹ID无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST,"收藏夹ID无效"));
             }
 
             if (level1DTO == null ||level1DTO.getAttachment_id() == null || level1DTO.getAttachment_id() <=0 ) {
-                return ResponseEntity.badRequest().body(Result.String(ResultCode.BAD_REQUEST, "封面路径不能为空"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST,"封面路径不能为空"));
             }
 
             String accessToken = extractAccessTokenFromRequest(request);
             if (accessToken == null || !jwtService.validateToken(accessToken)) {
-                return ResponseEntity.status(401).body(Result.String(ResultCode.UNAUTHORIZED, "未授权或Token无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"未授权或Token无效"));
             }
 
             Long userId = jwtService.extractUserId(accessToken);
             if (userId == null) {
-                return ResponseEntity.status(401).body(Result.String(ResultCode.UNAUTHORIZED, "用户ID无效"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"用户ID无效"));
             }
 
             boolean updated = collectionFolderLevel1Service.UpdateCover(level1DTO.getAttachment_id(),level1DTO.getId());
@@ -177,11 +162,44 @@ public class CollectionFolderLevel1Controller {
             if (updated) {
                 return ResponseEntity.ok(Result.success("更新收藏夹封面成功"));
             } else {
-                return ResponseEntity.status(500).body(Result.String(ResultCode.SYSTEM_ERROR, "更新收藏夹封面失败"));
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"更新收藏夹名称失败"));
             }
 
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Result.String(ResultCode.SYSTEM_ERROR, "更新收藏夹封面失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"更新收藏夹名称失败" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 删除一级收藏夹，级联删除
+     */
+    @GetMapping("/deleteFolder")
+    public ResponseEntity<Result<String>> deleteFolder(@RequestBody Level1DTO level1DTO,HttpServletRequest request) {
+        try {
+            if (level1DTO.getId() == null || level1DTO.getId() <= 0) {
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST,"收藏夹ID无效"));
+            }
+
+            String accessToken = extractAccessTokenFromRequest(request);
+            if (accessToken == null || !jwtService.validateToken(accessToken)) {
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"未授权或Token无效"));
+            }
+
+            Long userId = jwtService.extractUserId(accessToken);
+            if (userId == null) {
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED,"用户ID无效"));
+            }
+
+            boolean deleted = collectionFolderLevel1Service.DeleteCollectionFolderLevel1(level1DTO.getId());
+
+            if (deleted) {
+                return ResponseEntity.ok(Result.success("删除成功"));
+            } else {
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"删除失败"));
+            }
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR,"删除失败" + e.getMessage()));
         }
     }
 
@@ -189,7 +207,7 @@ public class CollectionFolderLevel1Controller {
      * 从请求中提取Access Token
      * 支持从Authorization头和Cookie中获取
      */
-    private String extractAccessTokenFromRequest(HttpServletRequest request) {
+    /*private String extractAccessTokenFromRequest(HttpServletRequest request) {
         // 1. 尝试从Authorization头获取
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
@@ -204,6 +222,18 @@ public class CollectionFolderLevel1Controller {
                     return cookie.getValue();
                 }
             }
+        }
+        return null;
+    }*/
+
+    /**
+     * 从请求中提取Access Token
+     * 仅从 Authorization header 获取
+     */
+    private String extractAccessTokenFromRequest(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            return authHeader.substring(7).trim();
         }
         return null;
     }

@@ -79,6 +79,28 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- ========================= 文件系统相关 ========================= -->
+
+        <!-- AWS SDK v2 S3 客户端与 Presigner -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.40.4</version>
+        </dependency>
+
+        <!-- Apache Commons IO -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.14.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+            <version>2.40.4</version>
+        </dependency>
+
         <!-- ========================= 安全认证相关 ========================= -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
