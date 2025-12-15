@@ -1,7 +1,5 @@
 package com.anime.common.entity.attachment;
 
-import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -10,7 +8,6 @@ import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 /**
  * Attachment 实体：对应数据库表 attachments
@@ -37,8 +34,10 @@ public class Attachment {
 
     private String url;
 
+    // 校验码(可以用于检验文件完整性)
     private String checksum;
 
+    // 拓展名
     private String mimeType;
 
     private Long sizeBytes;

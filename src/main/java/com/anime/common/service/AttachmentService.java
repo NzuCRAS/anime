@@ -82,6 +82,12 @@ public class AttachmentService {
     // --------------------------
     // Helper: sanitize storagePath & generate storage key
     // --------------------------
+
+    /**
+     * 清洗后端传递的文件存储路径
+     * @param storagePath
+     * @return
+     */
     private String sanitizeStoragePath(String storagePath) {
         if (storagePath == null) return "";
         String p = storagePath.replace('\\', '/').replaceAll("/+", "/").replaceAll("^/+", "").replaceAll("/+$", "");
@@ -94,12 +100,23 @@ public class AttachmentService {
         return safe;
     }
 
+    /**
+     * 从后端传输的文件拓展名得到文件类型
+     * @param contentType
+     * @return
+     */
     private String deriveExtensionFromContentType(String contentType) {
         if (contentType == null) return "";
         String t = contentType.split(";")[0].trim().toLowerCase();
         return MIME_TO_EXT.getOrDefault(t, "");
     }
 
+    /**
+     * 创建文件存储路径
+     * @param storagePath
+     * @param contentType
+     * @return
+     */
     private String generateStorageKey(String storagePath, String contentType) {
         String safePath = sanitizeStoragePath(storagePath);
         String uuid = UUID.randomUUID().toString();
@@ -117,8 +134,17 @@ public class AttachmentService {
     // 实现顺序：先生成 presign（若失败，不写 DB），presign 成功后插入 DB 并返回 DTO
     // metadata 不再写入数据库（保持 null）
     // --------------------------
+
+    /**
+     * 在文件系统中创建文件夹并创建一个用于前端PUT的url
+     * @param storagePath
+     * @param contentType
+     * @param uploadedBy
+     * @param originalFilename
+     * @return
+     */
     @Transactional
-    public PresignResponseDTO preCreateAndPresign(String storagePath, String contentType, Long uploadedBy, String originalFilename) {
+    public PresignResponseDTO preCreateAndPresign(String storagePath, String contentType, Long uploadedBy, String originalFilename, Integer width, Integer height) {
         // 1) 计算 storageKey（但不直接写 DB）
         String storageKey = generateStorageKey(storagePath, contentType);
 
@@ -151,12 +177,10 @@ public class AttachmentService {
         a.setChecksum(null);
         a.setMimeType(contentType);
         a.setSizeBytes(null);
-        a.setWidth(null);
-        a.setHeight(null);
+        a.setWidth(width);
+        a.setHeight(height);
         a.setUploadedBy(uploadedBy);
         a.setStatus("uploading");
-
-        // 不再写 originalFilename 到 metadata，保持 null
         a.setMetadata(null);
 
         a.setCreatedAt(LocalDateTime.now());
@@ -174,23 +198,23 @@ public class AttachmentService {
                 ? (cdnDomain.endsWith("/") ? cdnDomain + storageKey : cdnDomain + "/" + storageKey)
                 : null;
 
-        return new PresignResponseDTO(a.getId(), storageKey, presigned.url().toString(), headers, publicUrl);
+        return new PresignResponseDTO(a.getId(), presigned.url().toString(), headers, publicUrl);
     }
 
     @Transactional
     public PresignResponseDTO preCreateAndPresign(String storagePath, String contentType, Long uploadedBy) {
-        return preCreateAndPresign(storagePath, contentType, uploadedBy, null);
-    }
-
-    @Transactional
-    public PresignResponseDTO preCreateAndPresign(String contentType, Long uploadedBy) {
-        return preCreateAndPresign(null, contentType, uploadedBy, null);
+        return preCreateAndPresign(storagePath, contentType, uploadedBy, null, null, null);
     }
 
     // --------------------------
     // completeUpload / createFromUrl / uploadFromStream / delete / presigned-get
     // --------------------------
 
+    /**
+     * 完成文件传输后,使用完成传输的文件的attachmentId,进行数据库中的最终确认,把status字段设置为available
+     * @param attachmentId
+     * @return
+     */
     @Transactional
     public Attachment completeUpload(Long attachmentId) {
         if (attachmentId == null) throw new IllegalArgumentException("attachmentId required");
@@ -327,6 +351,12 @@ public class AttachmentService {
         }
     }
 
+    /**
+     * 创建一个能够GET的url,指定attachmentId和该url可用时间
+     * @param attachmentId
+     * @param expirySeconds
+     * @return
+     */
     public String generatePresignedGetUrl(Long attachmentId, long expirySeconds) {
         Attachment a = attachmentMapper.selectById(attachmentId);
         if (a == null) throw new IllegalArgumentException("attachment not found: " + attachmentId);

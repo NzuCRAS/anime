@@ -36,8 +36,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/user/register",
             "/api/user/ping",
             "/api/auth/refresh",
-            "/api/attachments/presign",
-            "/api/attachments/complete",
+/*            "/api/attachments/presign",
+            "/api/attachments/complete",*/
             "/api/test/",
             "/public/",
             "/static/",
@@ -77,6 +77,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
     }
 
+    /**
+     * 从Authorization Headers中获取accessToken
+     * @param request
+     * @return
+     */
     private String extractTokenFromRequest(HttpServletRequest request) {
         String bearer = request.getHeader("Authorization");
         if (bearer != null && bearer.startsWith("Bearer ")) {
