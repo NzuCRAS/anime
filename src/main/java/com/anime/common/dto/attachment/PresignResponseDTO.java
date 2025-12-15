@@ -16,13 +16,9 @@ import java.util.Map;
 public class PresignResponseDTO {
     /**
      * attachment数据库里的主键
+     * 前端需要暂时保存,后面需要传回给后端
      */
     private Long attachmentId;
-
-    /**
-     * 文件在文件系统中的存储路径，唯一标识文件在bucket中的位置
-     */
-    private String storageKey;
 
     /**
      * 给前端直接使用的文件存储地址，直接put即可

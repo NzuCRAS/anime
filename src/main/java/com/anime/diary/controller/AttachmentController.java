@@ -20,7 +20,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/attachments")
-@CrossOrigin(origins = "http://localhost:8080") // 开发时方便测试；生产环境请限制来源
+@CrossOrigin(origins = "http://localhost:8080") // 开发时方便测试;生产环境请限制来源
 @RequiredArgsConstructor
 public class AttachmentController {
 
@@ -31,11 +31,11 @@ public class AttachmentController {
      */
     @PostMapping("/presign")
     public ResponseEntity<?> presign(@RequestBody PresignRequest req) {
-        log.info("presign request storagePath={} originalFilename={} contentType={} uploadedBy={}",
-                req.getStoragePath(), req.getOriginalFilename(), req.getContentType(), req.getUploadedBy());
+        log.info("presign request storagePath={} originalFilename={} contentType={} uploadedBy={} width={} height={}",
+                req.getStoragePath(), req.getOriginalFilename(), req.getContentType(), req.getUploadedBy(), req.getWidth(), req.getHeight());
         try {
             PresignResponseDTO resp = attachmentService.preCreateAndPresign(
-                    req.getStoragePath(), req.getContentType(), req.getUploadedBy(), req.getOriginalFilename());
+                    req.getStoragePath(), req.getContentType(), req.getUploadedBy(), req.getOriginalFilename(),  req.getWidth(), req.getHeight());
             return ResponseEntity.ok(resp);
         } catch (Exception ex) {
             // 把异常栈写入日志，返回简短错误给前端（开发时可返回 ex.getMessage()）
@@ -74,6 +74,8 @@ public class AttachmentController {
         private String originalFilename;
         private String contentType;
         private Long uploadedBy;
+        private Integer width;
+        private Integer height;
     }
 
     @Data
