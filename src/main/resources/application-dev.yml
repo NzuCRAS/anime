@@ -32,6 +32,8 @@ mybatis-plus:
 jwt:
   secret: "replace_with_a_strong_random_secret_min_32_chars"
   issuer: "anime"
+  cookie-secure: true
+  cookie-same-site: "None"
   access-token:
     expiration: 900000       # 15 minutes in ms
   refresh-token:
@@ -42,6 +44,9 @@ cors:
   allowed-origins:
     - "http://localhost:3000"
     - "http://localhost:5173"
+    - "https://localhost:5173"
+    - "http://localhost:63342"
+    - "https://localhost:8443"
   exposed-headers:
     - "New-Access-Token"
   allow-credentials: true
@@ -49,3 +54,12 @@ cors:
 logging:
   level:
     com.anime: DEBUG
+
+server:
+  port: 8443
+  ssl:
+    enabled: true
+    key-store: file:C:\Code\JAVA\anime\src\main\resources\keystore.p12
+    key-store-password: changeit
+    key-store-type: PKCS12
+    key-alias: tomcat

@@ -1,6 +1,9 @@
 package com.anime.config;
 
 import com.anime.auth.filter.JwtAuthenticationFilter;
+import com.anime.common.exception.RestAccessDeniedHandler;
+import com.anime.common.exception.RestAuthenticationEntryPoint;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,9 +25,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider;
+    private final ObjectMapper objectMapper;
 
-    public SecurityConfig(ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider) {
+    public SecurityConfig(ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider, ObjectMapper objectMapper) {
         this.jwtFilterProvider = jwtFilterProvider;
+        this.objectMapper = objectMapper;
     }
 
     @Bean
@@ -32,10 +37,14 @@ public class SecurityConfig {
         http
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
+                .exceptionHandling(eh -> eh
+                        .authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
+                        .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper))
+                )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/user/login", "/api/user/register", "/api/auth/refresh")
                         .permitAll()
-                        .requestMatchers("/public/**", "/static/**", "/api/test/**", "/api/user/ping","/api/attachments/**").permitAll()
+                        .requestMatchers("/public/**", "/static/**",  "/api/user/ping","/api/attachments/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));

@@ -9,5 +9,4 @@ public class CollectedItemDTO {
     String name;
     String description;
     Long father_level2_id;
-
 }

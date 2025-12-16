@@ -20,7 +20,6 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/attachments")
-@CrossOrigin(origins = "http://localhost:8080") // 开发时方便测试;生产环境请限制来源
 @RequiredArgsConstructor
 public class AttachmentController {
 

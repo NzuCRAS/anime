@@ -37,11 +37,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/user/ping",
             "/api/auth/refresh",
 /*            "/api/attachments/presign",
-            "/api/attachments/complete",*/
-            "/api/test/",
+            "/api/attachments/complete",
+            "/api/test/",*/
             "/public/",
-            "/static/",
-            "/"
+            "/static/"
     );
 
     public JwtAuthenticationFilter(JwtService jwtService, ObjectMapper objectMapper) {
@@ -54,27 +53,45 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
+// 在 JwtAuthenticationFilter.doFilterInternal 中使用此调试片段（替换相应逻辑）
         String requestPath = request.getRequestURI();
+        log.debug("JwtAuthenticationFilter: incoming path={}, method={}", requestPath, request.getMethod());
+
         if (shouldSkipAuthentication(requestPath) || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            log.debug("JwtAuthenticationFilter: skipping authentication for path={}", requestPath);
             filterChain.doFilter(request, response);
             return;
         }
 
-        try {
-            String accessToken = extractTokenFromRequest(request);
+        String accessToken = extractTokenFromRequest(request);
+        log.debug("JwtAuthenticationFilter: hasAuthorizationHeader={}", accessToken != null);
 
-            if (accessToken != null && jwtService.validateToken(accessToken) && jwtService.isAccessToken(accessToken)) {
-                setAuthentication(accessToken);
-                filterChain.doFilter(request, response);
+        if (accessToken != null) {
+            try {
+                boolean valid = jwtService.validateToken(accessToken) && jwtService.isAccessToken(accessToken);
+                log.debug("JwtAuthenticationFilter: token validation result={}", valid);
+                if (valid) {
+                    Long userId = jwtService.extractUserId(accessToken);
+                    UsernamePasswordAuthenticationToken auth =
+                            new UsernamePasswordAuthenticationToken(userId, null, new ArrayList<>());
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                    log.info("JwtAuthenticationFilter: authenticated userId={} for path={}", userId, requestPath);
+                    filterChain.doFilter(request, response);
+                    return;
+                } else {
+                    log.warn("JwtAuthenticationFilter: token invalid or not access token for path={}", requestPath);
+                }
+            } catch (Exception ex) {
+                log.error("JwtAuthenticationFilter: exception while validating token for path=" + requestPath, ex);
+                // 返回 401 JSON
+                handleUnauthorized(response, "Authentication failure");
                 return;
             }
-
-            // 无有效 access token，直接返回 401；前端应在收到 401 时调用 /api/auth/refresh 或跳转登录
-            handleUnauthorized(response, "Token invalid or expired; please refresh or re-login");
-        } catch (Exception e) {
-            log.error("Error during JWT authentication: {}", e.getMessage(), e);
-            handleUnauthorized(response, "Authentication failure");
         }
+
+// 若没有有效 token
+        log.debug("JwtAuthenticationFilter: no valid token for path={}", requestPath);
+        handleUnauthorized(response, "Token invalid or expired; please refresh or re-login");
     }
 
     /**
@@ -90,16 +107,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private void setAuthentication(String accessToken) {
+    private void setAuthentication(String accessToken, String requestPath) {
         Long userId = jwtService.extractUserId(accessToken);
         UsernamePasswordAuthenticationToken auth =
                 new UsernamePasswordAuthenticationToken(userId, null, new ArrayList<>());
         SecurityContextHolder.getContext().setAuthentication(auth);
+        log.debug("JwtAuthenticationFilter: authenticated userId={} for path={}", userId, requestPath);
     }
 
     private boolean shouldSkipAuthentication(String path) {
         if (path == null) return false;
-        return SKIP_PATH_PREFIXES.stream().anyMatch(prefix -> path.startsWith(prefix));
+        return SKIP_PATH_PREFIXES.stream().anyMatch(path::startsWith);
     }
 
     private void handleUnauthorized(HttpServletResponse response, String message) throws IOException {
