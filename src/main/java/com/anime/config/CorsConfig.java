@@ -11,7 +11,7 @@ public class CorsConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
                 // 生产环境改为前端域名
-                .allowedOriginPatterns("http://localhost:3000", "http://localhost:5173", "http://localhost:8080", "http://localhost:63342/")
+                .allowedOriginPatterns("http://localhost:3000", "http://localhost:5173", "http://localhost:8080", "http://localhost:63342")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("New-Access-Token") // 让前端能读取这个 header

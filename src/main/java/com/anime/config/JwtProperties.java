@@ -22,6 +22,17 @@ public class JwtProperties {
     // 刷新令牌配置(RefreshToken是从AccessToken获取的)
     private RefreshToken refreshToken;
 
+    /**
+     * 当写入 refresh cookie 时是否设置 Secure 属性（生产环境建议 true）。
+     * 在开发本地使用 http 时可设置为 false，但在启用 HTTPS 后应设为 true。
+     */
+    private boolean cookieSecure = true;
+
+    /**
+     * SameSite 值（"None" / "Lax" / "Strict"），跨域 AJAX 刷新场景需要 "None" 并且 cookieSecure=true。
+     */
+    private String cookieSameSite = "Lax";
+
     @Data
     public static class AccessToken {
         // 到期时间,单位:毫秒(可以理解为这个token持续多长时间)

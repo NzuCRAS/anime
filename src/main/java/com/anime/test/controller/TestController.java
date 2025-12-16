@@ -1,7 +1,9 @@
-package controller;
+package com.anime.test.controller;
 
+import com.anime.auth.web.CurrentUser;
 import com.anime.common.dto.user.UserLoginDTO;
 import com.anime.common.result.Result;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -16,6 +18,14 @@ public class TestController {
     @GetMapping("/ping")
     public Result<String> ping() {
         return Result.success("pong");
+    }
+
+    @GetMapping("/whoami")
+    public ResponseEntity<?> whoami(@CurrentUser Long currentUserId) {
+        if (currentUserId == null) {
+            return ResponseEntity.status(401).body("anonymous");
+        }
+        return ResponseEntity.ok("userId=" + currentUserId);
     }
 
     // 新增：测试接收前端数据的接口
