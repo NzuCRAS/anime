@@ -1,5 +1,6 @@
 package com.anime.common.dto.diary;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -11,11 +12,23 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Schema(description = "日记的单个 Block，对应页面上的一段内容（文本/图片/嵌入等）")
 public class BlockDTO {
-    private Long blockId;           // 前端临时 id 或已有 DB id
+    @Schema(description = "客户端临时 id 或已有数据库 id（更新时传）", example = "123")
+    private Long blockId;
+
+    @Schema(description = "块类型，例如 'text' / 'image' / 'embed'", example = "image", required = true)
     private String type;
+
+    @Schema(description = "文本内容（text 类型时使用）", example = "这是一个文本块")
     private String content;
+
+    @Schema(description = "引用的 attachment id（image 类型时使用）", example = "456")
     private Long attachmentId;
-    private Integer position;  // 前端传的 position 会被后端重新覆盖为 1..N
+
+    @Schema(description = "位置（后端会按前端顺序重新分配），从1开始", example = "1")
+    private Integer position;
+
+    @Schema(description = "metadata JSON 字符串（例如 caption/alt/layout）", example = "{\"caption\":\"示例\"}")
     private String metadata;
 }

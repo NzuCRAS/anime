@@ -16,10 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * Spring Security 配置：注册 JwtAuthenticationFilter 到过滤链
- *
- * JwtAuthenticationFilter 使用 ObjectProvider 延迟注入，避免循环依赖。
- * 密码编码器的 bean 已移到独立的 PasswordConfig。
+ * 明确放行 OpenAPI / Swagger 相关路径与静态资源
  */
 @Configuration
 public class SecurityConfig {
@@ -42,15 +39,40 @@ public class SecurityConfig {
                         .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper))
                 )
                 .authorizeHttpRequests(auth -> auth
+                        // 公开的 API
                         .requestMatchers(HttpMethod.POST, "/api/user/login", "/api/user/register", "/api/auth/refresh")
                         .permitAll()
-                        .requestMatchers("/public/**", "/static/**",  "/api/user/ping","/api/attachments/**").permitAll()
+
+                        // swagger / openapi / static resources - 明确放行
+                        .requestMatchers(
+                                "/v3/api-docs",
+                                "/v3/api-docs/**",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**",
+                                "/swagger-ui-dist/**",
+                                "/swagger-resources/**",
+                                "/webjars/**",
+                                "/favicon.ico",
+                                "/favicon-*",
+                                "/css/**",
+                                "/js/**",
+                                "/images/**",
+                                "/assets/**",
+                                "/static/**",
+                                "/public/**"
+                        ).permitAll()
+
+                        // 其它公开资源
+                        .requestMatchers("/api/user/ping", "/api/attachments/**").permitAll()
+
+                        // 其余都需要认证
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 
         JwtAuthenticationFilter jwtFilter = jwtFilterProvider.getIfAvailable();
         if (jwtFilter != null) {
+            // 把 jwt 过滤器放到 UsernamePasswordAuthenticationFilter 之前
             http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         }
 

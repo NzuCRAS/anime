@@ -14,8 +14,8 @@ import java.util.List;
 public interface CollectionFolderLevel1Mapper extends BaseMapper<User> {
 
     //首先判断有没有默认收藏夹
-    @Select("SELECT * From collection_folders_level1 WHERE name = '默认收藏夹'")
-    List<CollectionFolderLevel1> getCollectionFolderLevel1ByName();
+    @Select("SELECT * From collection_folders_level1 WHERE name = '默认收藏夹' AND user_id = #{userId}")
+    List<CollectionFolderLevel1> getCollectionFolderLevel1ByName(@Param("userId") Long userId);
 
     //插入默认收藏夹，给我附件id，用户id
     @Insert("INSERT INTO collection_folders_level1 VALUES  ('默认收藏夹','id',NOW(),#{user_id})")

@@ -12,12 +12,7 @@ import java.time.LocalDateTime;
 /**
  * Block 实体：对应数据库表 blocks
  *
- * 说明：
- * - type: 'text', 'image', 'embed' 等
- * - content: 文本内容（对 text block 有值）；对于 image block，content 通常为空，attachmentId 指向 attachments
- * - attachmentId: 关联 attachments.id（nullable）
- * - position: 从 1 开始的连续编号（在一次性保存时，由后端按前端顺序重编号）
- * - metadata: JSON 原文字符串（可选；若要在 MyBatis 中自动映射为 Map/POJO，可实现 TypeHandler）
+ * 说明：新增 transient 字段 attachmentUrl（不持久化）用于返回给前端展示（image 类型的短期下载 URL）。
  */
 @Data
 @NoArgsConstructor
@@ -50,4 +45,10 @@ public class Block {
     private LocalDateTime updatedAt;
 
     private LocalDateTime deletedAt;
+
+    /**
+     * 运行时使用：当 block.type == "image" 且 attachmentId != null 时，后端会动态生成短期可用的下载 URL（presigned/get）
+     * 该字段不应被 MyBatis 持久化（transient），仅用于 response payload。
+     */
+    private transient String attachmentUrl;
 }
