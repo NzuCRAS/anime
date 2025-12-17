@@ -17,8 +17,8 @@ public class CollectionFolderLevel1Service {
     }
 
     //判断有无默认收藏夹
-    public List<CollectionFolderLevel1> getCollectionFolderLevel1ByName() {
-        return collectionFolderLevel1Mapper.getCollectionFolderLevel1ByName();
+    public List<CollectionFolderLevel1> getCollectionFolderLevel1ByName(Long userId) {
+        return collectionFolderLevel1Mapper.getCollectionFolderLevel1ByName(userId);
     }
     //新建新的收藏夹（给我用户id）
     public boolean createNewFolder(Long user_id) {

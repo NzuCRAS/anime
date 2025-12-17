@@ -10,7 +10,8 @@ public enum ResultCode {
     FORBIDDEN(403, "无权限"),
     NOT_FOUND(404, "资源不存在"),
     SYSTEM_ERROR(500, "系统错误"),
-    BAD_REQUEST(4001, "错误的请求");
+    BAD_REQUEST(4001, "错误的请求"),
+    VERSION_CONFLICT(409, "版本冲突");
 
     private final int code;
     private final String msg;

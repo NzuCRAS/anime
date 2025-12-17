@@ -89,4 +89,14 @@ public class CollectedItemService {
         item.setDescription(newDescription != null ? newDescription.trim() : "");
         return collectedItemMapper.updateById(item) > 0;
     }
+
+     /**
+     *  删除收藏项
+     */
+     public boolean deleteCollectionItem(Long itemId) {
+         if (itemId == null || itemId <= 0) {
+             return false;
+         }
+         return collectedItemMapper.deleteById(itemId) > 0;
+     }
 }

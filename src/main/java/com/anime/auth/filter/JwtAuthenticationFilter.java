@@ -12,35 +12,43 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
-/**
- * 精简后的认证过滤器：
- * - 仅从 Authorization header 中提取 access token（Bearer）
- * - 不再从 cookie 中读取 access token，也不在 filter 中自动用 refresh token 刷新
- * - 遇到无效或过期的 access token 返回 401，前端负责调用 refresh endpoint
- */
 @Slf4j
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final ObjectMapper objectMapper;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
-    private static final List<String> SKIP_PATH_PREFIXES = List.of(
+    private static final List<String> SKIP_PATH_PATTERNS = List.of(
             "/api/user/login",
             "/api/user/register",
             "/api/user/ping",
             "/api/auth/refresh",
-/*            "/api/attachments/presign",
-            "/api/attachments/complete",
-            "/api/test/",*/
-            "/public/",
-            "/static/"
+            "/v3/api-docs",
+            "/v3/api-docs/**",
+            "/swagger-ui.html",
+            "/swagger-ui/**",
+            "/swagger-ui-dist/**",
+            "/swagger-resources/**",
+            "/webjars/**",
+            "/public/**",
+            "/static/**",
+            "/api/test/**"
+    );
+
+    private static final Set<String> STATIC_EXT_WHITELIST = Set.of(
+            ".css", ".js", ".map", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".html"
     );
 
     public JwtAuthenticationFilter(JwtService jwtService, ObjectMapper objectMapper) {
@@ -53,16 +61,32 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-// 在 JwtAuthenticationFilter.doFilterInternal 中使用此调试片段（替换相应逻辑）
         String requestPath = request.getRequestURI();
-        log.debug("JwtAuthenticationFilter: incoming path={}, method={}", requestPath, request.getMethod());
+        String accept = request.getHeader("Accept");
+        String secFetchDest = request.getHeader("Sec-Fetch-Dest");
 
-        if (shouldSkipAuthentication(requestPath) || "OPTIONS".equalsIgnoreCase(request.getMethod())) {
-            log.debug("JwtAuthenticationFilter: skipping authentication for path={}", requestPath);
+        log.debug("JwtAuthenticationFilter: incoming path={}, method={}, Accept={}, Sec-Fetch-Dest={}",
+                requestPath, request.getMethod(), accept, secFetchDest);
+
+        // 1) 基于路径 pattern 跳过
+        if (shouldSkipAuthentication(requestPath)) {
+            log.debug("JwtAuthenticationFilter: skipping authentication by pattern for path={}", requestPath);
             filterChain.doFilter(request, response);
             return;
         }
 
+        // 2) 基于静态资源扩展名或者请求头判断为静态资源时跳过（更保险）
+        if (isStaticResource(requestPath) ||
+                (accept != null && (accept.contains("text/css") || accept.contains("application/javascript") || accept.contains("image/"))) ||
+                (secFetchDest != null && (secFetchDest.equalsIgnoreCase("style")
+                        || secFetchDest.equalsIgnoreCase("script")
+                        || secFetchDest.equalsIgnoreCase("image")))) {
+            log.debug("JwtAuthenticationFilter: skipping authentication by static/resource heuristics for path={}, Accept={}, SecFetchDest={}", requestPath, accept, secFetchDest);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // 3) 常规 token 逻辑：只在 Authorization header 存在时进行校验；否则继续链交给 Spring Security
         String accessToken = extractTokenFromRequest(request);
         log.debug("JwtAuthenticationFilter: hasAuthorizationHeader={}", accessToken != null);
 
@@ -79,45 +103,45 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     filterChain.doFilter(request, response);
                     return;
                 } else {
-                    log.warn("JwtAuthenticationFilter: token invalid or not access token for path={}", requestPath);
+                    log.warn("JwtAuthenticationFilter: token invalid for path={}", requestPath);
+                    handleUnauthorized(response, "Token invalid or expired; please refresh or re-login");
+                    return;
                 }
             } catch (Exception ex) {
-                log.error("JwtAuthenticationFilter: exception while validating token for path=" + requestPath, ex);
-                // 返回 401 JSON
+                log.error("JwtAuthenticationFilter: exception validating token for path=" + requestPath, ex);
                 handleUnauthorized(response, "Authentication failure");
                 return;
             }
         }
 
-// 若没有有效 token
-        log.debug("JwtAuthenticationFilter: no valid token for path={}", requestPath);
-        handleUnauthorized(response, "Token invalid or expired; please refresh or re-login");
+        // 没有 Authorization header -> 继续 filterChain，由 Spring Security 决定 permitAll/认证入口
+        log.debug("JwtAuthenticationFilter: no Authorization header, continue filter chain for path={}", requestPath);
+        filterChain.doFilter(request, response);
     }
 
-    /**
-     * 从Authorization Headers中获取accessToken
-     * @param request
-     * @return
-     */
+    private boolean shouldSkipAuthentication(String path) {
+        if (path == null) return false;
+        for (String pattern : SKIP_PATH_PATTERNS) {
+            if (pathMatcher.match(pattern, path)) return true;
+        }
+        return false;
+    }
+
+    private boolean isStaticResource(String path) {
+        if (path == null) return false;
+        String lower = path.toLowerCase(Locale.ROOT);
+        for (String ext : STATIC_EXT_WHITELIST) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
     private String extractTokenFromRequest(HttpServletRequest request) {
         String bearer = request.getHeader("Authorization");
         if (bearer != null && bearer.startsWith("Bearer ")) {
             return bearer.substring(7).trim();
         }
         return null;
-    }
-
-    private void setAuthentication(String accessToken, String requestPath) {
-        Long userId = jwtService.extractUserId(accessToken);
-        UsernamePasswordAuthenticationToken auth =
-                new UsernamePasswordAuthenticationToken(userId, null, new ArrayList<>());
-        SecurityContextHolder.getContext().setAuthentication(auth);
-        log.debug("JwtAuthenticationFilter: authenticated userId={} for path={}", userId, requestPath);
-    }
-
-    private boolean shouldSkipAuthentication(String path) {
-        if (path == null) return false;
-        return SKIP_PATH_PREFIXES.stream().anyMatch(path::startsWith);
     }
 
     private void handleUnauthorized(HttpServletResponse response, String message) throws IOException {

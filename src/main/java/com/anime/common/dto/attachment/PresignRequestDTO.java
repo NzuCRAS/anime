@@ -1,5 +1,6 @@
 package com.anime.common.dto.attachment;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -7,10 +8,11 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Schema(description = "预签名请求：请求后端生成 presigned PUT URL")
 public class PresignRequestDTO {
-    // 文件原始名称(形如"test.jpg")
-    private String originFileName;
+    @Schema(description = "文件原始名（例如 test.jpg）", example = "test.jpg")
+    private String originalFilename;
 
-    // 文件拓展名(形如"image/jpeg")
+    @Schema(description = "MIME 类型（例如 image/jpeg）", example = "image/jpeg")
     private String mimeType;
 }

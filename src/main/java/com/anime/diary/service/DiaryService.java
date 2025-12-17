@@ -1,21 +1,23 @@
 package com.anime.diary.service;
 
+import com.anime.common.dto.diary.GetUserDiaryDTO;
 import com.anime.common.entity.attachment.Attachment;
 import com.anime.common.entity.diary.Block;
 import com.anime.common.entity.diary.Diary;
 import com.anime.common.dto.diary.BlockDTO;
-import com.anime.common.mapper.attachment.AttachmentMapper;
 import com.anime.common.mapper.diary.DiaryMapper;
-import com.anime.diary.service.BlockService;
 import com.anime.common.service.AttachmentService;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -23,19 +25,9 @@ import java.util.stream.Collectors;
 /**
  * DiaryService - 负责 diary 的保存/查询及与 blocks/attachment 的联动。
  *
- * 设计说明：
- * - 采用乐观锁 version 字段：更新时以 WHERE id=? AND version=? 来保证并发写入检测。
- * - 保存流程（saveDiaryWithBlocks）：
- *   1) 若 diary.id == null -> 新建 diary 并写入 createdAt/updatedAt/version=1
- *   2) 否则按 version 做乐观更新（更新 title/updatedAt/version=version+1）
- *   3) 调用 BlockService.saveBlocksForDiary 保存该 diary 的 blocks（批量优化）
- *   4) 收集 blocks 中引用到的 attachmentId，逐个调用 AttachmentService.completeUpload(...) 去 headObject 并把对应 attachment 标记为 available
- *      - 这样采用“最终提交时批量 finalize attachments”策略（替代此前每次上传都做 complete 的做法）。
- * - 返回值 SaveResult 包含最终的 Diary 与该 Diary 的最新 Blocks 列表（从 DB 查询）。
- *
- * 注意：
- * - completeUpload 会进行网络调用（headObject），因此该方法可能较慢；如果你想降低提交延迟，可以把 completeUpload 的部分改为异步任务队列。
- * - operatorId 用于权限校验和审计（当前实现仅做日志记录，未实现复杂权限判断）。在实际场景请验证 operatorId 是否有权限修改该 diary。
+ * 修改点：
+ * - 在返回 diary + blocks 时（getDiaryWithBlocks），对于 type="image" 且 attachmentId 非空的 block，
+ *   使用 AttachmentService 生成短期的下载 URL 并设置到 Block.attachmentUrl 字段，前端可直接使用该 URL 显示图片。
  */
 @Slf4j
 @Service
@@ -45,6 +37,8 @@ public class DiaryService {
     private final DiaryMapper diaryMapper;
     private final BlockService blockService;
     private final AttachmentService attachmentService;
+
+    private static final long ATTACHMENT_URL_TTL_SECONDS = 600L; // 10 minutes
 
     /**
      * 保存日记（新建或更新）并保存/替换其 blocks。
@@ -93,7 +87,6 @@ public class DiaryService {
         List<Block> savedBlocks = blockService.saveBlocksForDiary(diaryId, blocks);
 
         // 3) 收集 blocks 中被使用的 attachmentId，并 finalize（completeUpload）这些 attachment
-        //    采用最终提交时批量 finalize 的策略：只有在业务确认后才将 attachment 状态改为 available
         Set<Long> chosenAttachmentIds = blocks.stream()
                 .map(BlockDTO::getAttachmentId)
                 .filter(Objects::nonNull)
@@ -103,11 +96,9 @@ public class DiaryService {
             log.info("Finalizing {} attachments for diary {} by user {}", chosenAttachmentIds.size(), diaryId, operatorId);
             for (Long aid : chosenAttachmentIds) {
                 try {
-                    // completeUpload 会 headObject 并把 attachment 标记为 available / 更新 checksum/size/url 等
                     Attachment att = attachmentService.completeUpload(aid);
                     log.debug("Attachment {} finalized for diary {}: {}", aid, diaryId, att == null ? "null" : att.getStatus());
                 } catch (Exception ex) {
-                    // 不要中断主流程：如果某个 attachment finalize 失败，记录日志并继续处理其它 attachment
                     log.warn("Failed to finalize attachment id={} for diary {}: {}", aid, diaryId, ex.getMessage());
                 }
             }
@@ -117,8 +108,93 @@ public class DiaryService {
         Diary finalDiary = diaryMapper.selectById(diaryId);
         List<Block> finalBlocks = blockService.getBlocksByDiaryId(diaryId);
 
+        // 为 image 类型的 block 动态注入短期下载 URL（attachmentUrl）
+        for (Block b : finalBlocks) {
+            try {
+                if (b != null && "image".equalsIgnoreCase(b.getType()) && b.getAttachmentId() != null) {
+                    String url = attachmentService.generatePresignedGetUrl(b.getAttachmentId(), ATTACHMENT_URL_TTL_SECONDS);
+                    b.setAttachmentUrl(url);
+                }
+            } catch (Exception ex) {
+                // 不要因为单个 attachment 生成失败而中断整体返回，记录警告即可
+                log.warn("failed to generate attachment url for block id={} attachmentId={}: {}", b == null ? null : b.getId(), b == null ? null : b.getAttachmentId(), ex.getMessage());
+            }
+        }
+
         return new SaveResult(finalDiary, finalBlocks);
     }
+
+    /**
+     * 获取某用户的日记摘要（不包含 blocks）
+     * 返回 List of GetUserDiaryDTO (id, title, createdAt)
+     */
+    public List<GetUserDiaryDTO> getDiariesByUserId(Long userId) {
+        if (userId == null) return Collections.emptyList();
+
+        QueryWrapper<Diary> qw = new QueryWrapper<>();
+        qw.select("id", "title", "created_at")
+                .eq("user_id", userId)
+                .isNull("deleted_at")
+                .orderByDesc("created_at");
+
+        List<Diary> diaries = diaryMapper.selectList(qw);
+        if (diaries == null || diaries.isEmpty()) return Collections.emptyList();
+
+        return diaries.stream()
+                .map(d -> new GetUserDiaryDTO(d.getId(), d.getTitle(), d.getCreatedAt()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 根据用户id和日期获取所有用户的日记摘要
+     * @param userId
+     * @param date
+     * @return
+     */
+    public List<GetUserDiaryDTO> getDiariesByUserIdAndDate(Long userId, LocalDate date) {
+        if (userId == null) return Collections.emptyList();
+        if (date == null) return Collections.emptyList();
+        List<Diary> diaries = diaryMapper.selectIdsByUserIdAndCreatedDate(userId, date);
+        List<GetUserDiaryDTO> getUserDiaryDTOs = new ArrayList<>();
+        for (Diary diary : diaries) {
+            GetUserDiaryDTO dto = new GetUserDiaryDTO();
+            dto.setId(diary.getId());
+            dto.setTitle(diary.getTitle());
+            dto.setCreatedAt(diary.getCreatedAt());
+            getUserDiaryDTOs.add(dto);
+        }
+        return getUserDiaryDTOs;
+    }
+
+    /**
+     * 删除（软删除）某个 diary（仅限 diary 的 owner）
+     *
+     * @param diaryId
+     * @param operatorId 当前操作用户 id
+     */
+    @Transactional
+    public void deleteDiary(Long diaryId, Long operatorId) {
+        if (diaryId == null) throw new IllegalArgumentException("diaryId required");
+        Diary d = diaryMapper.selectById(diaryId);
+        if (d == null) throw new IllegalStateException("Diary not found (id=" + diaryId + ")");
+        if (!Objects.equals(d.getUserId(), operatorId)) {
+            throw new AccessDeniedException("not owner of diary");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        UpdateWrapper<Diary> uw = new UpdateWrapper<>();
+        uw.eq("id", diaryId).isNull("deleted_at").set("deleted_at", now);
+        int updated = diaryMapper.update(null, uw);
+        if (updated == 0) {
+            throw new IllegalStateException("Diary already deleted or update failed (id=" + diaryId + ")");
+        }
+
+        // soft delete blocks
+        blockService.softDeleteBlocksForDiary(diaryId);
+
+        log.info("Diary id={} soft-deleted by user={}", diaryId, operatorId);
+    }
+
 
     /**
      * 简单读取 diary（不包含 blocks）
@@ -130,11 +206,24 @@ public class DiaryService {
 
     /**
      * 读取 diary 与其 blocks（按 position）
+     * 注意：返回的 blocks 中 image 类型的 block 会包含 attachmentUrl 字段（短期 presigned URL 或 CDN URL）
      */
     public SaveResult getDiaryWithBlocks(Long diaryId) {
         Diary d = getDiary(diaryId);
         if (d == null) return null;
         List<Block> blocks = blockService.getBlocksByDiaryId(diaryId);
+
+        for (Block b : blocks) {
+            try {
+                if (b != null && "image".equalsIgnoreCase(b.getType()) && b.getAttachmentId() != null) {
+                    String url = attachmentService.generatePresignedGetUrl(b.getAttachmentId(), ATTACHMENT_URL_TTL_SECONDS);
+                    b.setAttachmentUrl(url);
+                }
+            } catch (Exception ex) {
+                log.warn("failed to generate attachment url for block id={} attachmentId={}: {}", b == null ? null : b.getId(), b == null ? null : b.getAttachmentId(), ex.getMessage());
+            }
+        }
+
         return new SaveResult(d, blocks);
     }
 

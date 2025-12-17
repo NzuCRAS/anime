@@ -1,8 +1,11 @@
 package com.anime.diary.controller;
 
+import com.anime.common.dto.attachment.PresignRequestDTO;
 import com.anime.common.dto.attachment.PresignResponseDTO;
 import com.anime.common.entity.attachment.Attachment;
 import com.anime.common.service.AttachmentService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -14,9 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Collections;
 import java.util.Map;
 
-/**
- * 简单的 Attachment Controller，用于本地联调和 smoke-test。
- */
+@Tag(name = "Attachment", description = "附件上传与 presign 相关接口")
 @Slf4j
 @RestController
 @RequestMapping("/api/attachments")
@@ -25,27 +26,7 @@ public class AttachmentController {
 
     private final AttachmentService attachmentService;
 
-    /**
-     * 预创建并生成 presigned PUT URL（带异常捕获，开发时方便定位）
-     */
-    @PostMapping("/presign")
-    public ResponseEntity<?> presign(@RequestBody PresignRequest req) {
-        log.info("presign request storagePath={} originalFilename={} contentType={} uploadedBy={} width={} height={}",
-                req.getStoragePath(), req.getOriginalFilename(), req.getContentType(), req.getUploadedBy(), req.getWidth(), req.getHeight());
-        try {
-            PresignResponseDTO resp = attachmentService.preCreateAndPresign(
-                    req.getStoragePath(), req.getContentType(), req.getUploadedBy(), req.getOriginalFilename(),  req.getWidth(), req.getHeight());
-            return ResponseEntity.ok(resp);
-        } catch (Exception ex) {
-            // 把异常栈写入日志，返回简短错误给前端（开发时可返回 ex.getMessage()）
-            log.error("presign failed", ex);
-            return ResponseEntity.status(500).body(Collections.singletonMap("error", ex.getMessage()));
-        }
-    }
-
-    /**
-     * 上传完成通知：前端在 PUT 成功后调用此接口以完成 DB 状态更新
-     */
+    @Operation(summary = "上传完成通知", description = "前端 PUT 到 presigned URL 后调用，后端将 attachment 标记为 available 并更新 metadata")
     @PostMapping("/complete")
     public ResponseEntity<Attachment> complete(@RequestBody CompleteRequest req) {
         log.info("complete request attachmentId={}", req.getAttachmentId());
@@ -53,9 +34,7 @@ public class AttachmentController {
         return ResponseEntity.ok(a);
     }
 
-    /**
-     * 返回 presigned GET
-     */
+    @Operation(summary = "获取 presigned GET URL", description = "返回短期有效的 GET URL")
     @GetMapping("/{id}/presigned-get")
     public ResponseEntity<Map<String, String>> presignedGet(
             @PathVariable("id") Long id,
@@ -63,18 +42,6 @@ public class AttachmentController {
 
         String url = attachmentService.generatePresignedGetUrl(id, expirySeconds);
         return ResponseEntity.ok(Collections.singletonMap("url", url));
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PresignRequest {
-        private String storagePath;
-        private String originalFilename;
-        private String contentType;
-        private Long uploadedBy;
-        private Integer width;
-        private Integer height;
     }
 
     @Data

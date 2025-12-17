@@ -5,15 +5,21 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Anime - 测试客户端 (login / presign / upload / diary)</title>
     <style>
-        body { font-family: Arial, Helvetica, sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+        body { font-family: Arial, Helvetica, sans-serif; padding: 20px; max-width: 1000px; margin: auto; }
         input, button, textarea { font-size: 14px; margin: 4px 0; }
         .box { border: 1px solid #ddd; padding: 12px; margin: 12px 0; border-radius: 6px; }
         .log { white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 4px; max-height: 240px; overflow:auto; }
         label { display:block; margin-top:8px; }
+        .diary-header { margin: 8px 0; padding: 8px; border-bottom: 1px solid #eee; }
+        .blocks { margin-top: 12px; }
+        .block { border: 1px solid #eee; padding: 8px; margin: 8px 0; border-radius: 6px; display:flex; gap:12px; align-items:flex-start; }
+        .block img { max-width: 320px; max-height: 240px; object-fit:contain; border-radius:4px; }
+        .block .meta { flex:1; }
+        .placeholder { color:#999; font-size:13px; }
     </style>
 </head>
 <body>
-<h2>测试客户端：登录 / whoami / presign 上传 / 保存日记</h2>
+<h2>测试客户端：登录 / presign / upload / diary（含显示 blocks）</h2>
 
 <div class="box">
     <h3>1) 登录（会写 refreshToken cookie，返回 access token 到 header）</h3>
@@ -31,21 +37,28 @@
 
 <div class="box">
     <h3>2.1) WhoAmI - 验证当前 token 是否生效</h3>
-    <p>调用 GET /api/test/whoami（依赖 Authorization header），用于快速验证当前 access token 是否被后端接受并注入 @CurrentUser。</p>
     <button id="btnWhoami">WhoAmI</button>
-    <p>说明：若返回 userId=... 表示 token 生效；若返回 401 表示认证未通过。</p>
 </div>
 
 <div class="box">
-    <h3>3) 选择图片并获取 presign 上传 URL</h3>
+    <h3>3) 选择图片（共用 file input）</h3>
     <input type="file" id="fileInput" accept="image/*">
     <label>原始文件名（可选）：<input id="origName" placeholder="保留原文件名用于 metadata"></label>
-    <button id="btnPresignUpload">获取 presign 并上传</button>
-    <p>上传完成后会显示 attachmentId（请记住用于保存日记时传回后端）</p>
 </div>
 
 <div class="box">
-    <h3>4) 保存日记（POST /api/diaries）</h3>
+    <h3>4) /api/attachments/presign - 获取 presign 并上传</h3>
+    <button id="btnPresignUpload">获取 presign 并上传 (/api/attachments/presign)</button>
+</div>
+
+<div class="box">
+    <h3>4.1) /api/diary/presign - Diary 专用 presign 并上传</h3>
+    <label>可选原始文件名（默认使用选中文件名）：<input id="diaryOrigName" placeholder="原始文件名"></label>
+    <button id="btnDiaryPresignUpload">获取 presign 并上传 (/api/diary/presign)</button>
+</div>
+
+<div class="box">
+    <h3>5) 保存日记（POST /api/diary/save）</h3>
     <label>Diary Title: <input id="diaryTitle" value="测试日记"></label>
     <label>Diary ID (更新时填写): <input id="diaryId" placeholder="留空表示新建"></label>
     <label>Diary Version (更新时填写): <input id="diaryVersion" placeholder="更新用"></label>
@@ -55,14 +68,18 @@
   {"blockId": null, "type":"text","content":"这是一个测试文本块","attachmentId":null,"metadata":null},
   {"blockId": null, "type":"image","content":null,"attachmentId":null,"metadata":null}
 ]</textarea>
-    <p>提示：如果你的 image block 用到了刚上传的 attachmentId，请把 JSON 中对应 attachmentId 替换为该 id。</p>
-    <button id="btnSaveDiary">保存日记 (POST /api/diaries)</button>
+    <button id="btnSaveDiary">保存日记 (POST /api/diary/save)</button>
 </div>
 
 <div class="box">
-    <h3>5) 获取日记（GET /api/diaries/{id}）</h3>
+    <h3>6) 获取日记（GET /api/diary/id/{id}）并在页面显示（包含图片）</h3>
     <label>Diary ID: <input id="qryDiaryId"></label>
-    <button id="btnGetDiary">获取</button>
+    <button id="btnGetDiary">获取并显示日记</button>
+
+    <div id="diaryDisplay" style="margin-top:12px;">
+        <div id="diaryInfo" class="diary-header"></div>
+        <div id="blocksContainer" class="blocks"></div>
+    </div>
 </div>
 
 <div class="box">
@@ -71,15 +88,6 @@
 </div>
 
 <script>
-    /*
-      简单客户端逻辑：
-      - accessToken 保存在内存变量 currentAccessToken
-      - 登录请求需要 credentials: 'include' 以便服务端写 refresh cookie
-      - refresh 也需要 credentials: 'include'
-      - presign 上传：如果后端要求 Authorization，可在请求头加入 Authorization
-      - 上传 PUT 到 presigned URL 时通常不要带 Authorization（使用 presigned url），但需要设置返回的 putHeaders
-    */
-
     let currentAccessToken = null;
     const BASE = 'https://localhost:8443';
 
@@ -89,7 +97,6 @@
         el.textContent = `${now}  ${msg}\n\n` + el.textContent;
     }
 
-    // helper to add Authorization header if we have token
     function authHeaders() {
         const headers = {};
         if (currentAccessToken) headers['Authorization'] = 'Bearer ' + currentAccessToken;
@@ -103,19 +110,17 @@
         try {
             const res = await fetch(`${BASE}/api/user/login`, {
                 method: 'POST',
-                credentials: 'include', // allow refresh cookie to be written
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ usernameOrEmail: username, password })
             });
             const text = await res.text();
             log(`[login] status=${res.status} body=${text}`);
-            // New-Access-Token header may contain access token (front should sync it into memory)
             const newAccess = res.headers.get('New-Access-Token');
             if (newAccess) {
                 currentAccessToken = newAccess;
                 log('[login] got New-Access-Token header -> saved to memory');
             } else {
-                // maybe returned in body as JSON; try parse
                 try {
                     const json = JSON.parse(text);
                     const bodyToken = json?.data?.accessToken || json?.accessToken;
@@ -135,15 +140,11 @@
         try {
             const res = await fetch(`${BASE}/api/auth/refresh`, {
                 method: 'POST',
-                credentials: 'include', // must send refresh cookie
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest'  // 标识为 AJAX 请求
-                }
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
             });
             const json = await res.json().catch(()=>null);
             log(`[refresh] status=${res.status} body=${JSON.stringify(json)}`);
-            // server returns access token in body (data.accessToken) or New-Access-Token header
             const headerToken = res.headers.get('New-Access-Token');
             if (headerToken) {
                 currentAccessToken = headerToken;
@@ -172,149 +173,155 @@
         }
     });
 
-    // Presign + Upload（替换原来的同名 handler）
+    // upload helper
+    async function uploadToPresigned(putUrl, putHeaders, file, contentType) {
+        const uploadHeaders = {};
+        for (const k in putHeaders) {
+            if (!Object.prototype.hasOwnProperty.call(putHeaders, k)) continue;
+            uploadHeaders[k] = putHeaders[k];
+        }
+        uploadHeaders['Content-Type'] = contentType;
+
+        const uploadRes = await fetch(putUrl, {
+            method: 'PUT',
+            headers: uploadHeaders,
+            body: file,
+        });
+
+        log(`[upload] PUT -> status=${uploadRes.status} ${uploadRes.statusText}`);
+        if (!uploadRes.ok) {
+            const text = await uploadRes.text().catch(()=>null);
+            log('[upload] upload failed; response text: ' + text);
+            return false;
+        }
+        return true;
+    }
+
+    // /api/attachments/presign
     document.getElementById('btnPresignUpload').addEventListener('click', async () => {
         const f = document.getElementById('fileInput').files[0];
-        if (!f) {
-            alert('请选择文件');
-            return;
-        }
+        if (!f) { alert('请选择文件'); return; }
         const orig = document.getElementById('origName').value || f.name;
         const contentType = f.type || 'application/octet-stream';
-
-        // 构造和后端 AttachmentController.PresignRequest 对应的 body
-        const presignReq = {
-            storagePath: null,          // 后端会自行生成 storageKey，传 null 或空
-            originalFilename: orig,
-            contentType: contentType,
-            uploadedBy: null,           // 前端不传 userId（后端从 token 或上下文决定），可传 null
-            width: null,
-            height: null
-        };
-
+        const presignReq = { storagePath: null, originalFilename: orig, contentType: contentType, uploadedBy: null, width: null, height: null };
         try {
-            // 请求 presign
             const res = await fetch(`${BASE}/api/attachments/presign`, {
                 method: 'POST',
-                credentials: 'include', // allow cookie if needed by server-side auth
+                credentials: 'include',
                 headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
                 body: JSON.stringify(presignReq)
             });
-
-            // 注意：AttachmentController 返回 PresignResponseDTO（未包在统一 Result 中）
-            const resp = await res.json();
+            const resp = await res.json().catch(()=>null);
             log(`[presign] status=${res.status} body=${JSON.stringify(resp)}`);
-
-            if (!res.ok) {
-                log('[presign] presign failed: ' + JSON.stringify(resp));
-                return;
-            }
-
-            // resp 是直接的 PresignResponseDTO 或包含字段
-            const attachmentId = resp.attachmentId || resp.attachment_id || resp.id;
-            const putUrl = resp.putUrl || resp.put_url || resp.put_url;
-            const putHeaders = resp.putHeaders || resp.put_headers || resp.headers || {};
-
-            if (!putUrl || !attachmentId) {
-                log('[presign] invalid response, missing putUrl or attachmentId');
-                return;
-            }
-
-            log(`[presign] got attachmentId=${attachmentId} putUrl=${putUrl}`);
-
-            // 上传到 presigned URL
-            // 构造 PUT headers（需要严格匹配服务器签名）
-            const uploadHeaders = {};
-            for (const k in putHeaders) {
-                if (!Object.prototype.hasOwnProperty.call(putHeaders, k)) continue;
-                uploadHeaders[k] = putHeaders[k];
-            }
-            uploadHeaders['Content-Type'] = contentType;
-
-            const uploadRes = await fetch(putUrl, {
-                method: 'PUT',
-                headers: uploadHeaders,
-                body: f,
-                // credentials: 'omit' 通常是默认，但不要发带 cookie 到存储域
+            if (!res.ok) return;
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+            const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if (!ok) return;
+            log(`[presign] upload successful. attachmentId=${attachmentId}`);
+            // finalize
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId })
             });
-
-            log(`[upload] PUT -> status=${uploadRes.status} ${uploadRes.statusText}`);
-            if (!uploadRes.ok) {
-                const text = await uploadRes.text().catch(()=>null);
-                log('[upload] upload failed; response text: ' + text);
-                return;
-            }
-
-            log(`[upload] upload successful. attachmentId=${attachmentId}`);
-
-            // 上传完成后，调用 /api/attachments/complete 通知后端（AttachmentController 提供）
-            try {
-                const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
-                    body: JSON.stringify({ attachmentId })
-                });
-                const completeBody = await completeRes.json().catch(()=>null);
-                log(`[complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
-                if (completeRes.ok) {
-                    // 自动把 attachmentId 填回 blocksJson 的第一个空 attachmentId 处，便于后续保存
-                    const blocksEl = document.getElementById('blocksJson');
-                    try {
-                        const arr = JSON.parse(blocksEl.value);
-                        for (let i = 0; i < arr.length; i++) {
-                            if (arr[i].attachmentId == null) {
-                                arr[i].attachmentId = attachmentId;
-                                break;
-                            }
+            const completeBody = await completeRes.json().catch(()=>null);
+            log(`[complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
+            if (completeRes.ok) {
+                // autofill first empty attachmentId in blocksJson
+                const blocksEl = document.getElementById('blocksJson');
+                try {
+                    const arr = JSON.parse(blocksEl.value);
+                    for (let i = 0; i < arr.length; i++) {
+                        if (arr[i].attachmentId == null) {
+                            arr[i].attachmentId = attachmentId;
+                            break;
                         }
-                        blocksEl.value = JSON.stringify(arr, null, 2);
-                    } catch(e) {}
-                } else {
-                    log('[complete] finalize failed: ' + JSON.stringify(completeBody));
-                }
-            } catch (e) {
-                log('[complete] error: ' + e.message);
+                    }
+                    blocksEl.value = JSON.stringify(arr, null, 2);
+                } catch(e){}
             }
-
         } catch (e) {
             log('[presign/upload] error: ' + e.message);
         }
     });
 
-    // Save Diary
+    // /api/diary/presign
+    document.getElementById('btnDiaryPresignUpload').addEventListener('click', async () => {
+        const f = document.getElementById('fileInput').files[0];
+        if (!f) { alert('请选择文件'); return; }
+        const orig = document.getElementById('diaryOrigName').value || f.name;
+        const contentType = f.type || 'application/octet-stream';
+        const presignReq = { originalFilename: orig, mimeType: contentType };
+        try {
+            const res = await fetch(`${BASE}/api/diary/presign`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify(presignReq)
+            });
+            const resp = await res.json().catch(()=>null);
+            log(`[diary presign] status=${res.status} body=${JSON.stringify(resp)}`);
+            if (!res.ok) return;
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+            const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if (!ok) return;
+            log(`[diary presign] upload successful. attachmentId=${attachmentId}`);
+            // finalize via attachments/complete
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId })
+            });
+            const completeBody = await completeRes.json().catch(()=>null);
+            log(`[diary complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
+            if (completeRes.ok) {
+                const blocksEl = document.getElementById('blocksJson');
+                try {
+                    const arr = JSON.parse(blocksEl.value);
+                    for (let i = 0; i < arr.length; i++) {
+                        if (arr[i].attachmentId == null) {
+                            arr[i].attachmentId = attachmentId;
+                            break;
+                        }
+                    }
+                    blocksEl.value = JSON.stringify(arr, null, 2);
+                } catch(e){}
+            }
+        } catch (e) {
+            log('[diary presign/upload] error: ' + e.message);
+        }
+    });
+
+    // Save diary (/api/diary/save)
     document.getElementById('btnSaveDiary').addEventListener('click', async () => {
         const title = document.getElementById('diaryTitle').value;
         const diaryId = document.getElementById('diaryId').value || null;
         const diaryVersion = document.getElementById('diaryVersion').value || null;
         let blocks;
-        try {
-            blocks = JSON.parse(document.getElementById('blocksJson').value);
-        } catch (e) {
-            alert('blocksJson 不是合法的 JSON');
-            return;
-        }
-        // build diary object
+        try { blocks = JSON.parse(document.getElementById('blocksJson').value); } catch(e){ alert('blocksJson 非法'); return; }
         const diary = {};
         if (diaryId) diary.id = Number(diaryId);
         if (diaryVersion) diary.version = Number(diaryVersion);
         diary.title = title;
-
         const payload = { diary, blocks };
-
         try {
-            const res = await fetch(`${BASE}/api/diaries`, {
+            const res = await fetch(`${BASE}/api/diary/save`, {
                 method: 'POST',
                 headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
-                credentials: 'include', // include so server can access cookie if finalize uses cookie-sensitive ops
+                credentials: 'include',
                 body: JSON.stringify(payload)
             });
             const data = await res.json().catch(()=>null);
             log(`[saveDiary] status=${res.status} body=${JSON.stringify(data)}`);
-            if (res.status === 200) {
-                // update local diary id/version and block ids if returned
+            if (res.ok) {
+                // optionally update diaryId/version and blocksJson
                 const result = data && data.data ? data.data : data;
-                // result likely has diary and blocks (your SaveResult)
                 if (result && result.diary) {
                     document.getElementById('diaryId').value = result.diary.id || '';
                     document.getElementById('diaryVersion').value = result.diary.version || '';
@@ -322,48 +329,106 @@
                 if (result && result.blocks) {
                     document.getElementById('blocksJson').value = JSON.stringify(result.blocks, null, 2);
                 }
-            } else if (res.status === 409) {
-                alert('版本冲突，请刷新页面并合并修改');
-            }
-        } catch (e) {
-            log('[saveDiary] error: ' + e.message);
-        }
+            } else if (res.status === 409) alert('版本冲突');
+        } catch (e) { log('[saveDiary] error: ' + e.message); }
     });
 
-    // Get Diary
+    // Render diary & blocks into page
+    function renderDiary(result) {
+        const infoEl = document.getElementById('diaryInfo');
+        const blocksContainer = document.getElementById('blocksContainer');
+        infoEl.innerHTML = '';
+        blocksContainer.innerHTML = '';
+
+        if (!result || !result.diary) {
+            infoEl.textContent = '未查到日记';
+            return;
+        }
+
+        const d = result.diary;
+        infoEl.innerHTML = `<strong>Diary #${d.id}</strong> &nbsp; <span class="placeholder">title:</span> ${escapeHtml(d.title || '')}
+            <div class="placeholder">createdAt: ${d.createdAt || ''} &nbsp; updatedAt: ${d.updatedAt || ''} &nbsp; version: ${d.version || ''}</div>`;
+
+        const blocks = result.blocks || [];
+        if (blocks.length === 0) {
+            blocksContainer.innerHTML = '<div class="placeholder">没有 blocks</div>';
+            return;
+        }
+
+        for (const b of blocks) {
+            const blockEl = document.createElement('div');
+            blockEl.className = 'block';
+            const imgWrapper = document.createElement('div');
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'meta';
+
+            // Image case
+            if (b.type && b.type.toLowerCase() === 'image' && b.attachmentUrl) {
+                const img = document.createElement('img');
+                img.src = b.attachmentUrl;
+                img.alt = b.metadata || ('image-' + (b.id || ''));
+                img.onerror = () => { img.style.opacity = 0.6; img.title = '图片加载失败'; };
+                imgWrapper.appendChild(img);
+            } else if (b.type && b.type.toLowerCase() === 'image') {
+                // no URL available
+                imgWrapper.innerHTML = '<div class="placeholder">（图片，无可用 url）</div>';
+            } else {
+                imgWrapper.innerHTML = '<div class="placeholder">非图片</div>';
+            }
+
+            // meta: show type, content, attachmentId, position, metadata
+            const contentHtml = b.content ? `<div><strong>内容:</strong> ${escapeHtml(b.content)}</div>` : '';
+            const attachmentHtml = b.attachmentId ? `<div><strong>attachmentId:</strong> ${b.attachmentId}</div>` : '';
+            const posHtml = b.position != null ? `<div><strong>position:</strong> ${b.position}</div>` : '';
+            const metaJson = b.metadata ? `<div><strong>metadata:</strong> ${escapeHtml(b.metadata)}</div>` : '';
+            metaDiv.innerHTML = `<div><strong>类型:</strong> ${escapeHtml(b.type || '')}</div>` +
+                contentHtml + attachmentHtml + posHtml + metaJson;
+
+            blockEl.appendChild(imgWrapper);
+            blockEl.appendChild(metaDiv);
+            blocksContainer.appendChild(blockEl);
+        }
+    }
+
+    function escapeHtml(s) {
+        if (!s && s !== 0) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    // Get diary and render (calls /api/diary/id/{id})
     document.getElementById('btnGetDiary').addEventListener('click', async () => {
         const id = document.getElementById('qryDiaryId').value;
         if (!id) { alert('请输入 diary id'); return; }
         try {
-            const res = await fetch(`${BASE}/api/diaries/${id}`, {
+            const res = await fetch(`${BASE}/api/diary/id/${id}`, {
                 method: 'GET',
-                headers: authHeaders(),
+                headers: Object.assign({}, authHeaders()),
                 credentials: 'include'
             });
             const data = await res.json().catch(()=>null);
             log(`[getDiary] status=${res.status} body=${JSON.stringify(data)}`);
             if (res.status === 200 && data) {
-                // populate fields for convenience
                 const result = data.data ? data.data : data;
-                if (result.diary) {
-                    document.getElementById('diaryId').value = result.diary.id || '';
-                    document.getElementById('diaryTitle').value = result.diary.title || '';
-                    document.getElementById('diaryVersion').value = result.diary.version || '';
-                }
-                if (result.blocks) {
-                    document.getElementById('blocksJson').value = JSON.stringify(result.blocks, null, 2);
-                }
+                renderDiary(result);
+            } else {
+                // show error message
+                document.getElementById('diaryInfo').textContent = `请求失败：status=${res.status}`;
+                document.getElementById('blocksContainer').innerHTML = '';
             }
         } catch (e) {
             log('[getDiary] error: ' + e.message);
         }
     });
 
-    // show current access token for debugging (not persisted)
+    // show current access token debug
     setInterval(() => {
         log('[debug] currentAccessToken=' + (currentAccessToken ? ('***' + currentAccessToken.slice(-8)) : 'null'));
-    }, 60000); // 每60s输出一次，避免频繁
-
+    }, 60000);
 </script>
 </body>
 </html>
