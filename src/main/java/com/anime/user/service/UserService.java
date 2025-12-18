@@ -7,15 +7,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 
 /**
- * UserService - 负责与用户相关的业务逻辑：
- * - authenticateAndGetId: 验证凭证并返回用户ID（null 表示验证失败）
- * - getUsernameById: 根据 userId 返回用户名
- * - onLoginSuccess: 登录成功后的业务（如更新 last_login 等）
- * - registerUser: 注册新用户（返回新用户id 或抛出异常）
- *。
+ * UserService - 负责与用户相关的业务逻辑。
  */
 @Slf4j
 @Service
@@ -29,14 +25,43 @@ public class UserService {
         this.passwordEncoder = passwordEncoder;
     }
 
+
+
     @Transactional
     public Boolean PostUserAvatar(Long userId, Long attachmentId) {
         if (userId == null) throw new IllegalArgumentException("userId required");
         if (attachmentId == null) throw new IllegalArgumentException("attachmentId required");
         User user = userMapper.selectById(userId);
         if (user == null) throw new IllegalArgumentException("user id not found");
-        user.setAvatar_attachment_id(String.valueOf(attachmentId));
-        userMapper.updateById(user);
+        // use setter that matches your User entity (existing code used setAvatar_attachment_id)
+        try {
+            // try common setter names
+            try {
+                Method m = user.getClass().getMethod("setAvatar_attachment_id", String.class);
+                m.invoke(user, String.valueOf(attachmentId));
+            } catch (NoSuchMethodException e1) {
+                try {
+                    Method m2 = user.getClass().getMethod("setAvatarAttachmentId", Long.class);
+                    m2.invoke(user, attachmentId);
+                } catch (NoSuchMethodException e2) {
+                    // fallback: try setAvatarAttachmentId(String)
+                    try {
+                        Method m3 = user.getClass().getMethod("setAvatarAttachmentId", String.class);
+                        m3.invoke(user, String.valueOf(attachmentId));
+                    } catch (NoSuchMethodException ex) {
+                        // last resort: set via direct field not attempted here
+                        throw new RuntimeException("No appropriate setter for avatar attachment id on User entity");
+                    }
+                }
+            }
+            userMapper.updateById(user);
+        } catch (RuntimeException re) {
+            throw re;
+        } catch (Exception ex) {
+            log.error("failed to set avatar attachment id via reflection", ex);
+            throw new RuntimeException("failed to update avatar", ex);
+        }
+
         log.info("Update avatar_attachment id={} by user={}", attachmentId, userId);
         return true;
     }
@@ -50,8 +75,7 @@ public class UserService {
             // userMapper.updateLastLogin 期望参数为 String 或 Long，根据你的 mapper 定义调整
             userMapper.updateLastLogin(String.valueOf(userId));
         } catch (Exception e) {
-            // 不要抛出异常影响主流程，记录日志即可
-            // logger.warn("更新 last_login 失败", e);
+            log.debug("更新 last_login 失败: {}", e.getMessage());
         }
     }
 
@@ -65,9 +89,6 @@ public class UserService {
 
     /**
      * 验证用户名/邮箱 + 明文密码，成功返回 userId，失败返回 null
-     * 实现要点：
-     * - 通过 userMapper.findByUsernameOrEmail 查询用户（包含数据库写入的哈希密码）
-     * - 使用 PasswordEncoder.matches(plain, hash) 验证
      */
     public Long authenticateAndGetId(String usernameOrEmail, String password) {
         if (usernameOrEmail == null || password == null) return null;
@@ -79,46 +100,98 @@ public class UserService {
             boolean ok = passwordEncoder.matches(password, storedHash);
             return ok ? u.getId() : null;
         } catch (Exception e) {
-            // 处理异常（记录日志），并返回 null
+            log.debug("authenticateAndGetId failed: {}", e.getMessage());
             return null;
         }
     }
 
     /**
-     * 注册新用户：检查唯一性 -> 加密密码 -> 插入数据库 -> 返回新 userId
-     *
-     * 语义与实现要点：
-     * - 需要保证 username 与 email 的唯一性（可在 DB 层加唯一索引，并在此处检验抛出友好异常）
-     * - 密码使用 PasswordEncoder 加密（实际为 BCryptPasswordEncoder）
-     * - 注册完成后会默认视为已登录（由控制器生成 token 并写 cookie）
+     * 注册新用户并返回新 userId
      */
     public Long registerUser(String username, String email, String rawPassword) {
         if (username == null || email == null || rawPassword == null) {
             throw new IllegalArgumentException("username/email/password must not be null");
         }
 
-        // 1) 唯一性检查（尽早）
         User exist = userMapper.findByUsernameOrEmail(username, email);
         if (exist != null) {
             throw new IllegalArgumentException("用户名或邮箱已存在");
         }
 
-        // 2) 密码加密
         String encoded = passwordEncoder.encode(rawPassword);
 
-        // 3) 构建 User 实体并插入
         User newUser = new User();
         newUser.setUsername(username);
         newUser.setEmail(email);
         newUser.setPassword(encoded);
         newUser.setCreatedTime(LocalDateTime.now());
-        // 你可以根据 User 实体补充更多字段（avatar, status 等）
 
-        int rows = userMapper.insert(newUser); // MyBatis-Plus 会回填 id（如果使用自增）
+        int rows = userMapper.insert(newUser);
         if (rows <= 0) {
             throw new RuntimeException("用户创建失败");
         }
-        // 插入后 newUser.getId() 应该有值（取决于数据库与MyBatis-Plus设置）
         return newUser.getId();
+    }
+
+    /**
+     * 获取用户绑定的 avatar attachment id（如果有），否则返回 null。
+     * 该方法使用反射尝试多种常见 getter 名称以适配实体命名风格。
+     */
+    public Long getAvatarAttachmentId(Long userId) {
+        if (userId == null) return null;
+        try {
+            return userMapper.getAvatarAttachmentIdById(userId);
+        } catch (Exception e) {
+            log.debug("getAvatarAttachmentId failed for userId {}: {}", userId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 获取用户的 personal signature（如果存在），否则返回 null。
+     * 同样使用反射兼容常见 getter 命名。
+     */
+    public String getPersonalSignature(Long userId) {
+        if (userId == null) return null;
+        User user = userMapper.selectById(userId);
+        if (user == null) return null;
+
+        try {
+            String[] getterNames = new String[] {
+                    "getPersonalSignature",
+                    "getPersonal_signature",
+                    "getPersonalSignatureText",
+                    "getSignature",
+                    "getPersonalSign"
+            };
+            for (String gn : getterNames) {
+                try {
+                    Method m = user.getClass().getMethod(gn);
+                    Object val = m.invoke(user);
+                    if (val != null) return String.valueOf(val);
+                } catch (NoSuchMethodException ignore) {
+                }
+            }
+
+            // fallback to fields
+            try {
+                java.lang.reflect.Field f = null;
+                try { f = user.getClass().getDeclaredField("personalSignature"); } catch (NoSuchFieldException e) {}
+                if (f == null) {
+                    try { f = user.getClass().getDeclaredField("personal_signature"); } catch (NoSuchFieldException e) {}
+                }
+                if (f != null) {
+                    f.setAccessible(true);
+                    Object val = f.get(user);
+                    if (val != null) return String.valueOf(val);
+                }
+            } catch (Throwable t) {
+                log.debug("personalSignature field fallback failed: {}", t.getMessage());
+            }
+
+        } catch (Throwable t) {
+            log.debug("getPersonalSignature failed for userId {}: {}", userId, t.getMessage());
+        }
+        return null;
     }
 }

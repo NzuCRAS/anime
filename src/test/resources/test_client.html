@@ -16,10 +16,25 @@
         .block img { max-width: 320px; max-height: 240px; object-fit:contain; border-radius:4px; }
         .avatar-preview { max-width: 160px; max-height:160px; border:1px solid #ccc; border-radius:6px; display:block; margin-top:8px; }
         .placeholder { color:#999; font-size:13px; }
+        .user-info { display:flex; gap:12px; align-items:center; }
+        .user-info .meta { font-size:14px; }
+        .user-info .meta .name { font-weight:600; font-size:16px; }
+        .user-info img { width:64px; height:64px; object-fit:cover; border-radius:50%; border:1px solid #ddd; }
     </style>
 </head>
 <body>
 <h2>测试客户端：登录 / presign / upload / diary / user avatar</h2>
+
+<div class="box">
+    <h3>当前用户</h3>
+    <div id="userInfo" class="user-info">
+        <img id="userAvatarSmall" src="" alt="avatar" style="display:none;">
+        <div class="meta">
+            <div class="name" id="userName">未登录</div>
+            <div id="userSignature" class="placeholder"></div>
+        </div>
+    </div>
+</div>
 
 <div class="box">
     <h3>1) 登录（会写 refreshToken cookie，返回 access token 到 header）</h3>
@@ -120,6 +135,26 @@
         return headers;
     }
 
+    function showUserInfo(user) {
+        if (!user) {
+            document.getElementById('userName').textContent = '未登录';
+            document.getElementById('userSignature').textContent = '';
+            document.getElementById('userAvatarSmall').style.display = 'none';
+            return;
+        }
+        const name = user.username || ('user-' + (user.id || ''));
+        document.getElementById('userName').textContent = name;
+        const sig = user.personalSignature || '';
+        document.getElementById('userSignature').textContent = sig;
+        const avatarEl = document.getElementById('userAvatarSmall');
+        if (user.userAvatarUrl) {
+            avatarEl.src = user.userAvatarUrl;
+            avatarEl.style.display = 'block';
+        } else {
+            avatarEl.style.display = 'none';
+        }
+    }
+
     // Login
     document.getElementById('btnLogin').addEventListener('click', async () => {
         const username = document.getElementById('username').value;
@@ -133,20 +168,34 @@
             });
             const text = await res.text();
             log(`[login] status=${res.status} body=${text}`);
+
+            // try to get New-Access-Token header first
             const newAccess = res.headers.get('New-Access-Token');
             if (newAccess) {
                 currentAccessToken = newAccess;
                 log('[login] got New-Access-Token header -> saved to memory');
-            } else {
-                try {
-                    const json = JSON.parse(text);
-                    const bodyToken = json?.data?.accessToken || json?.accessToken;
-                    if (bodyToken) {
-                        currentAccessToken = bodyToken;
+            }
+
+            // parse JSON body to show user info (Result<UserInfoDTO>)
+            let json = null;
+            try { json = JSON.parse(text); } catch(e){ json = null; }
+            if (json) {
+                // Result may wrap in { isSuccess, code, message, data }
+                const payload = json.data !== undefined ? json.data : json;
+                if (payload && typeof payload === 'object') {
+                    // If payload contains accessToken (unlikely for /api/user/login), handle it
+                    if (payload.accessToken && !currentAccessToken) {
+                        currentAccessToken = payload.accessToken;
                         log('[login] got accessToken from body -> saved to memory');
                     }
-                } catch (e) {}
+                    // Show user info if the payload is a user info object
+                    // Heuristic: presence of username or userAvatarUrl
+                    if (payload.username || payload.userAvatarUrl || payload.personalSignature) {
+                        showUserInfo(payload);
+                    }
+                }
             }
+
         } catch (e) {
             log('[login] error: ' + e.message);
         }
@@ -393,12 +442,18 @@
                 headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
                 body: JSON.stringify({ attachmentId: lastAvatarAttachmentId })
             });
-            const body = await res.text().catch(()=>null);
-            log(`[bindAvatar] status=${res.status} body=${body}`);
+            const body = await res.json().catch(()=>null);
+            log(`[bindAvatar] status=${res.status} body=${JSON.stringify(body)}`);
             if (res.ok) {
                 alert('绑定头像成功');
+                // if server returned avatarUrl, update small avatar display
+                const payload = body && body.data ? body.data : body;
+                if (payload && payload.avatarUrl) {
+                    document.getElementById('userAvatarSmall').src = payload.avatarUrl;
+                    document.getElementById('userAvatarSmall').style.display = 'block';
+                }
             } else {
-                alert('绑定头像失败: ' + body);
+                alert('绑定头像失败: ' + JSON.stringify(body));
             }
         } catch (e) {
             log('[bindAvatar] error: ' + e.message);

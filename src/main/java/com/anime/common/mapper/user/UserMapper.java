@@ -23,4 +23,7 @@ public interface UserMapper extends BaseMapper<User> {
 
     @Select("SELECT username FROM users WHERE id = #{userId}")
     String getUserNameById(Long userId);
+
+    @Select("SELECT avatar_attachment_id FROM users WHERE id = #{userId}")
+    Long getAvatarAttachmentIdById(Long userId);
 }

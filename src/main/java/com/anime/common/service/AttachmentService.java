@@ -379,4 +379,8 @@ public class AttachmentService {
         return presigned.url().toString();
     }
 
+    public Attachment getAttachmentById(Long attachmentId) {
+        if (attachmentId == null) return null;
+        return attachmentMapper.selectById(attachmentId);
+    }
 }
