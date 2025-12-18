@@ -2,8 +2,10 @@ package com.anime.user.service;
 
 import com.anime.common.entity.user.User;
 import com.anime.common.mapper.user.UserMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
@@ -15,6 +17,7 @@ import java.time.LocalDateTime;
  * - registerUser: 注册新用户（返回新用户id 或抛出异常）
  *。
  */
+@Slf4j
 @Service
 public class UserService {
 
@@ -24,6 +27,18 @@ public class UserService {
     public UserService(UserMapper userMapper, PasswordEncoder passwordEncoder) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
+    }
+
+    @Transactional
+    public Boolean PostUserAvatar(Long userId, Long attachmentId) {
+        if (userId == null) throw new IllegalArgumentException("userId required");
+        if (attachmentId == null) throw new IllegalArgumentException("attachmentId required");
+        User user = userMapper.selectById(userId);
+        if (user == null) throw new IllegalArgumentException("user id not found");
+        user.setAvatar_attachment_id(String.valueOf(attachmentId));
+        userMapper.updateById(user);
+        log.info("Update avatar_attachment id={} by user={}", attachmentId, userId);
+        return true;
     }
 
     /**

@@ -11,6 +11,11 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
 
+logging:
+  level:
+    org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping: DEBUG
+    com.anime: DEBUG
+
   redis:
     host: 127.0.0.1
     port: 6379
@@ -51,9 +56,6 @@ cors:
     - "New-Access-Token"
   allow-credentials: true
 
-logging:
-  level:
-    com.anime: DEBUG
 
 server:
   port: 8443

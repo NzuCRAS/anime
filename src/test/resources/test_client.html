@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Anime - 测试客户端 (login / presign / upload / diary)</title>
+    <title>Anime - 测试客户端 (login / presign / upload / diary / user avatar)</title>
     <style>
         body { font-family: Arial, Helvetica, sans-serif; padding: 20px; max-width: 1000px; margin: auto; }
         input, button, textarea { font-size: 14px; margin: 4px 0; }
@@ -14,12 +14,12 @@
         .blocks { margin-top: 12px; }
         .block { border: 1px solid #eee; padding: 8px; margin: 8px 0; border-radius: 6px; display:flex; gap:12px; align-items:flex-start; }
         .block img { max-width: 320px; max-height: 240px; object-fit:contain; border-radius:4px; }
-        .block .meta { flex:1; }
+        .avatar-preview { max-width: 160px; max-height:160px; border:1px solid #ccc; border-radius:6px; display:block; margin-top:8px; }
         .placeholder { color:#999; font-size:13px; }
     </style>
 </head>
 <body>
-<h2>测试客户端：登录 / presign / upload / diary（含显示 blocks）</h2>
+<h2>测试客户端：登录 / presign / upload / diary / user avatar</h2>
 
 <div class="box">
     <h3>1) 登录（会写 refreshToken cookie，返回 access token 到 header）</h3>
@@ -41,7 +41,7 @@
 </div>
 
 <div class="box">
-    <h3>3) 选择图片（共用 file input）</h3>
+    <h3>3) 选择图片（共用 file input for general uploads）</h3>
     <input type="file" id="fileInput" accept="image/*">
     <label>原始文件名（可选）：<input id="origName" placeholder="保留原文件名用于 metadata"></label>
 </div>
@@ -55,6 +55,22 @@
     <h3>4.1) /api/diary/presign - Diary 专用 presign 并上传</h3>
     <label>可选原始文件名（默认使用选中文件名）：<input id="diaryOrigName" placeholder="原始文件名"></label>
     <button id="btnDiaryPresignUpload">获取 presign 并上传 (/api/diary/presign)</button>
+</div>
+
+<!-- New: User avatar upload section (independent) -->
+<div class="box">
+    <h3>U) 上传用户头像（独立于其它 presign/upload 流程）</h3>
+    <p>流程：选择头像 -> 请求 /api/user/presign -> 上传 PUT 到 presigned URL -> 调用 /api/attachments/complete -> 调用 /api/user/userAvatar 绑定头像</p>
+    <input type="file" id="avatarFileInput" accept="image/*">
+    <label>可选原始文件名（avatar）：<input id="avatarOrigName" placeholder="avatar.jpg"></label>
+    <div style="margin-top:8px;">
+        <button id="btnUserPresignUpload">获取 presign 并上传 (/api/user/presign)</button>
+        <button id="btnBindAvatar" disabled>绑定头像到用户 (/api/user/userAvatar)</button>
+    </div>
+    <div id="avatarInfo" style="margin-top:8px;">
+        <div>最近上传的 attachmentId: <span id="avatarAttachmentId">-</span></div>
+        <img id="avatarPreview" class="avatar-preview" src="" alt="avatar preview" style="display:none;">
+    </div>
 </div>
 
 <div class="box">
@@ -90,6 +106,7 @@
 <script>
     let currentAccessToken = null;
     const BASE = 'https://localhost:8443';
+    let lastAvatarAttachmentId = null;
 
     function log(msg) {
         const el = document.getElementById('log');
@@ -173,7 +190,7 @@
         }
     });
 
-    // upload helper
+    // Common upload helper used by flows
     async function uploadToPresigned(putUrl, putHeaders, file, contentType) {
         const uploadHeaders = {};
         for (const k in putHeaders) {
@@ -229,20 +246,6 @@
             });
             const completeBody = await completeRes.json().catch(()=>null);
             log(`[complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
-            if (completeRes.ok) {
-                // autofill first empty attachmentId in blocksJson
-                const blocksEl = document.getElementById('blocksJson');
-                try {
-                    const arr = JSON.parse(blocksEl.value);
-                    for (let i = 0; i < arr.length; i++) {
-                        if (arr[i].attachmentId == null) {
-                            arr[i].attachmentId = attachmentId;
-                            break;
-                        }
-                    }
-                    blocksEl.value = JSON.stringify(arr, null, 2);
-                } catch(e){}
-            }
         } catch (e) {
             log('[presign/upload] error: ' + e.message);
         }
@@ -271,7 +274,6 @@
             const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
             if (!ok) return;
             log(`[diary presign] upload successful. attachmentId=${attachmentId}`);
-            // finalize via attachments/complete
             const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
                 method: 'POST',
                 credentials: 'include',
@@ -298,6 +300,111 @@
         }
     });
 
+    // New: User avatar presign & upload (independent)
+    document.getElementById('btnUserPresignUpload').addEventListener('click', async () => {
+        const f = document.getElementById('avatarFileInput').files[0];
+        if (!f) { alert('请选择头像文件'); return; }
+        const orig = document.getElementById('avatarOrigName').value || f.name;
+        const contentType = f.type || 'application/octet-stream';
+        const presignReq = { originalFilename: orig, mimeType: contentType };
+
+        try {
+            const res = await fetch(`${BASE}/api/user/presign`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify(presignReq)
+            });
+            const resp = await res.json().catch(()=>null);
+            log(`[user presign] status=${res.status} body=${JSON.stringify(resp)}`);
+            if (!res.ok) return;
+
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+
+            if (!putUrl || !attachmentId) {
+                log('[user presign] invalid response, missing putUrl or attachmentId');
+                return;
+            }
+
+            log(`[user presign] got attachmentId=${attachmentId} putUrl=${putUrl}`);
+
+            const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if (!ok) return;
+
+            log(`[user presign] upload successful. attachmentId=${attachmentId}`);
+
+            // finalize via attachments/complete
+            try {
+                const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                    body: JSON.stringify({ attachmentId })
+                });
+                const completeBody = await completeRes.json().catch(()=>null);
+                log(`[user complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
+                if (completeRes.ok) {
+                    lastAvatarAttachmentId = attachmentId;
+                    document.getElementById('avatarAttachmentId').textContent = String(attachmentId);
+                    document.getElementById('btnBindAvatar').disabled = false;
+
+                    // fetch presigned-get for preview
+                    try {
+                        const getRes = await fetch(`${BASE}/api/attachments/${attachmentId}/presigned-get?expiry=300`, {
+                            method: 'GET',
+                            credentials: 'include',
+                            headers: Object.assign({}, authHeaders())
+                        });
+                        const getBody = await getRes.json().catch(()=>null);
+                        const url = getBody && (getBody.url || getBody.data || getBody.putUrl) ? (getBody.url || getBody.data || getBody.putUrl) : (getBody && Object.values(getBody)[0]);
+                        if (url) {
+                            const img = document.getElementById('avatarPreview');
+                            img.src = url;
+                            img.style.display = 'block';
+                        }
+                    } catch (e) {
+                        log('[user presign] presigned-get failed: ' + e.message);
+                    }
+                } else {
+                    log('[user complete] finalize failed');
+                }
+            } catch (e) {
+                log('[user complete] error: ' + e.message);
+            }
+
+        } catch (e) {
+            log('[user presign/upload] error: ' + e.message);
+        }
+    });
+
+    // Bind avatar to user
+    document.getElementById('btnBindAvatar').addEventListener('click', async () => {
+        if (!lastAvatarAttachmentId) {
+            alert('请先上传头像并完成 finalize');
+            return;
+        }
+        try {
+            // Call user avatar binding endpoint - send JSON { attachmentId }
+            const res = await fetch(`${BASE}/api/user/userAvatar`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId: lastAvatarAttachmentId })
+            });
+            const body = await res.text().catch(()=>null);
+            log(`[bindAvatar] status=${res.status} body=${body}`);
+            if (res.ok) {
+                alert('绑定头像成功');
+            } else {
+                alert('绑定头像失败: ' + body);
+            }
+        } catch (e) {
+            log('[bindAvatar] error: ' + e.message);
+        }
+    });
+
     // Save diary (/api/diary/save)
     document.getElementById('btnSaveDiary').addEventListener('click', async () => {
         const title = document.getElementById('diaryTitle').value;
@@ -320,7 +427,6 @@
             const data = await res.json().catch(()=>null);
             log(`[saveDiary] status=${res.status} body=${JSON.stringify(data)}`);
             if (res.ok) {
-                // optionally update diaryId/version and blocksJson
                 const result = data && data.data ? data.data : data;
                 if (result && result.diary) {
                     document.getElementById('diaryId').value = result.diary.id || '';
@@ -370,13 +476,12 @@
                 img.onerror = () => { img.style.opacity = 0.6; img.title = '图片加载失败'; };
                 imgWrapper.appendChild(img);
             } else if (b.type && b.type.toLowerCase() === 'image') {
-                // no URL available
                 imgWrapper.innerHTML = '<div class="placeholder">（图片，无可用 url）</div>';
             } else {
                 imgWrapper.innerHTML = '<div class="placeholder">非图片</div>';
             }
 
-            // meta: show type, content, attachmentId, position, metadata
+            // meta
             const contentHtml = b.content ? `<div><strong>内容:</strong> ${escapeHtml(b.content)}</div>` : '';
             const attachmentHtml = b.attachmentId ? `<div><strong>attachmentId:</strong> ${b.attachmentId}</div>` : '';
             const posHtml = b.position != null ? `<div><strong>position:</strong> ${b.position}</div>` : '';
@@ -416,7 +521,6 @@
                 const result = data.data ? data.data : data;
                 renderDiary(result);
             } else {
-                // show error message
                 document.getElementById('diaryInfo').textContent = `请求失败：status=${res.status}`;
                 document.getElementById('blocksContainer').innerHTML = '';
             }

@@ -16,9 +16,6 @@ import java.util.UUID;
 
 /**
  * 负责生成/解析/验证 JWT（access + refresh）
- * 注意：
- * - RefreshToken 的服务端旋转/存储由 RefreshTokenService (Redis) 协作实现
- * - refreshAccessToken(...) 会校验 refreshToken 是否存在于 RefreshTokenService 中并执行旋转操作
  */
 @Slf4j
 @Service
@@ -111,7 +108,6 @@ public class JwtService {
 
     /**
      * 验证 token 的有效性（签名 + 过期）
-     * @param token
      */
     public boolean validateToken(String token) {
         try {
@@ -143,8 +139,6 @@ public class JwtService {
 
     /**
      * 从 token 中提取 userId
-     * @param token
-     * @return
      */
     public Long extractUserId(String token) {
         Claims c = parseToken(token);
@@ -154,8 +148,6 @@ public class JwtService {
 
     /**
      * 从 token 中提取 jti
-     * @param token
-     * @return
      */
     public String extractJti(String token) {
         Claims c = parseToken(token);
@@ -164,12 +156,25 @@ public class JwtService {
 
     /**
      * 从 token 中提取 username
-     * @param token
-     * @return
      */
     public String extractUsername(String token) {
         Claims c = parseToken(token);
         return c.get("username", String.class);
+    }
+
+    /**
+     * 计算 token 剩余毫秒数（若无法解析或无 exp 返回 <=0）
+     */
+    public long getRemainingMillis(String token) {
+        try {
+            Claims c = parseToken(token);
+            Date exp = c.getExpiration();
+            if (exp == null) return 0L;
+            return Math.max(0L, exp.getTime() - System.currentTimeMillis());
+        } catch (Exception e) {
+            log.debug("getRemainingMillis failed: {}", e.getMessage());
+            return 0L;
+        }
     }
 
     /**
@@ -183,13 +188,6 @@ public class JwtService {
 
     /**
      * 使用 refreshToken 刷新并返回新的 TokenPair（包含 access + refresh）
-     *
-     * 流程：
-     * 1) 验证 refreshToken 的签名/过期/type
-     * 2) 检查 refresh 的 jti 是否在 RefreshTokenService（Redis）中有效
-     * 3) 生成新 pair，并让 RefreshTokenService 旋转（删除旧 jti，写入新 jti）
-     *
-     * 注意：RefreshTokenService.rotateRefreshToken 的原子性依赖调用者 / Redis 实现（如需严格并发保证，可使用 Lua 脚本）
      */
     public TokenPair refreshAccessToken(String refreshToken) {
         if (refreshToken == null) {

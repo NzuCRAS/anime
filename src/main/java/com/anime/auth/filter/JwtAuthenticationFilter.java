@@ -1,5 +1,6 @@
 package com.anime.auth.filter;
 
+import com.anime.auth.service.AccessTokenBlacklistService;
 import com.anime.auth.service.JwtService;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
@@ -8,6 +9,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -23,11 +25,13 @@ import java.util.Set;
 
 @Slf4j
 @Component
+@AllArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final ObjectMapper objectMapper;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
+    private final AccessTokenBlacklistService accessTokenBlacklistService;
 
     private static final List<String> SKIP_PATH_PATTERNS = List.of(
             "/api/user/login",
@@ -43,18 +47,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/webjars/**",
             "/public/**",
             "/static/**",
-            "/api/test/**"
+            "/api/test/**",
+            "/api/user/logout"
     );
 
     private static final Set<String> STATIC_EXT_WHITELIST = Set.of(
             ".css", ".js", ".map", ".png", ".jpg", ".jpeg", ".gif", ".webp",
             ".svg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".html"
     );
-
-    public JwtAuthenticationFilter(JwtService jwtService, ObjectMapper objectMapper) {
-        this.jwtService = jwtService;
-        this.objectMapper = objectMapper;
-    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -75,7 +75,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 2) 基于静态资源扩展名或者请求头判断为静态资源时跳过（更保险）
+        // 2) 静态资源判断跳过
         if (isStaticResource(requestPath) ||
                 (accept != null && (accept.contains("text/css") || accept.contains("application/javascript") || accept.contains("image/"))) ||
                 (secFetchDest != null && (secFetchDest.equalsIgnoreCase("style")
@@ -86,7 +86,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 3) 常规 token 逻辑：只在 Authorization header 存在时进行校验；否则继续链交给 Spring Security
+        // 3) token 逻辑
         String accessToken = extractTokenFromRequest(request);
         log.debug("JwtAuthenticationFilter: hasAuthorizationHeader={}", accessToken != null);
 
@@ -94,7 +94,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 boolean valid = jwtService.validateToken(accessToken) && jwtService.isAccessToken(accessToken);
                 log.debug("JwtAuthenticationFilter: token validation result={}", valid);
+                // if token is valid, check jti blacklist first
                 if (valid) {
+                    String jti = jwtService.extractJti(accessToken);
+                    if (accessTokenBlacklistService.isBlacklisted(jti)) {
+                        log.warn("JwtAuthenticationFilter: access token jti={} is blacklisted", jti);
+                        handleUnauthorized(response, "Token revoked");
+                        return;
+                    }
                     Long userId = jwtService.extractUserId(accessToken);
                     UsernamePasswordAuthenticationToken auth =
                             new UsernamePasswordAuthenticationToken(userId, null, new ArrayList<>());
@@ -103,7 +110,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     filterChain.doFilter(request, response);
                     return;
                 } else {
-                    log.warn("JwtAuthenticationFilter: token invalid for path={}", requestPath);
+                    log.warn("JwtAuthenticationFilter: token invalid or expired for path={}", requestPath);
                     handleUnauthorized(response, "Token invalid or expired; please refresh or re-login");
                     return;
                 }
@@ -114,7 +121,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        // 没有 Authorization header -> 继续 filterChain，由 Spring Security 决定 permitAll/认证入口
+        // 没有 Authorization header -> 继续 filterChain，由 Spring Security 决定 permitAll/AuthenticationEntryPoint
         log.debug("JwtAuthenticationFilter: no Authorization header, continue filter chain for path={}", requestPath);
         filterChain.doFilter(request, response);
     }
