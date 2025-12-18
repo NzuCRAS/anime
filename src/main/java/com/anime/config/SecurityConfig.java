@@ -40,17 +40,11 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         // 公开的 API
-                        .requestMatchers(HttpMethod.POST, "/api/user/login", "/api/user/register", "/api/auth/refresh")
+                        .requestMatchers(HttpMethod.POST, "/api/user/login", "/api/user/register", "/api/auth/refresh", "/api/user/logout")
                         .permitAll()
 
                         // swagger / openapi / static resources - 明确放行
                         .requestMatchers(
-                                "/v3/api-docs",
-                                "/v3/api-docs/**",
-                                "/swagger-ui.html",
-                                "/swagger-ui/**",
-                                "/swagger-ui-dist/**",
-                                "/swagger-resources/**",
                                 "/webjars/**",
                                 "/favicon.ico",
                                 "/favicon-*",
@@ -59,7 +53,13 @@ public class SecurityConfig {
                                 "/images/**",
                                 "/assets/**",
                                 "/static/**",
-                                "/public/**"
+                                "/public/**",
+                                "/v3/api-docs",
+                                "/v3/api-docs/**",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**",
+                                "/swagger-ui-dist/**",
+                                "/swagger-resources/**"
                         ).permitAll()
 
                         // 其它公开资源
