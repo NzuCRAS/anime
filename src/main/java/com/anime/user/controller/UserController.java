@@ -7,6 +7,8 @@ import com.anime.auth.utils.JwtCookieUtil;
 import com.anime.auth.web.CurrentUser;
 import com.anime.common.dto.attachment.PresignRequestDTO;
 import com.anime.common.dto.attachment.PresignResponseDTO;
+import com.anime.common.dto.user.AvatarBindDTO;
+import com.anime.common.dto.user.UserInfoDTO;
 import com.anime.common.dto.user.UserLoginDTO;
 import com.anime.common.dto.user.UserRegisterDTO;
 import com.anime.common.enums.ResultCode;
@@ -42,24 +44,81 @@ public class UserController {
     private final JwtProperties jwtProperties;
     private final AccessTokenBlacklistService accessTokenBlacklistService;
 
+    private final static UserInfoDTO failUserInfoDTO = new UserInfoDTO();
+
     @Operation(summary = "登录（支持 Authorization header / refresh cookie / 凭证三种方式）", description = "优先使用 Authorization header；其次尝试 refresh cookie；否则使用用户名密码登录")
     @PostMapping("/login")
-    public ResponseEntity<Result<String>> login(
+    public ResponseEntity<Result<UserInfoDTO>> login(
             @RequestBody(required = false) UserLoginDTO loginDTO,
             @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
             @CookieValue(value = "refreshToken", required = false) String refreshToken,
             HttpServletResponse response) {
+
+        // Helper to build UserInfoDTO for a given userId
+        java.util.function.Function<Long, UserInfoDTO> buildUserInfo = (uid) -> {
+            UserInfoDTO info = new UserInfoDTO();
+            info.setId(uid == null ? null : String.valueOf(uid));
+            try {
+                info.setUsername(userService.getUsernameById(uid));
+            } catch (Exception ex) {
+                log.debug("failed to get username for userId={}: {}", uid, ex.getMessage());
+            }
+
+            // Try to obtain user's avatar attachment id from userService (method name may differ in your codebase)
+            Long avatarAttachmentId = null;
+            try {
+                // NOTE: adjust the method name below to match your UserService API if different.
+                avatarAttachmentId = userService.getAvatarAttachmentId(uid);
+            } catch (Throwable ignore) {
+                // If your UserService doesn't expose avatar id, ignore and leave avatarAttachmentId==null
+                log.debug("getAvatarAttachmentId not available or failed for userId={}: {}", uid, ignore.getMessage());
+            }
+
+            if (avatarAttachmentId != null) {
+                try {
+                    // generate a short-lived presigned GET url (e.g. 300 seconds)
+                    String url = attachmentService.generatePresignedGetUrl(avatarAttachmentId, 300L);
+                    info.setUserAvatarUrl(url);
+                } catch (Exception e) {
+                    log.debug("failed to generate presigned url for avatar attachment {}: {}", avatarAttachmentId, e.getMessage());
+                    info.setUserAvatarUrl(null);
+                }
+            } else {
+                info.setUserAvatarUrl(null);
+            }
+
+            // personalSignature - try to get from userService if available
+            try {
+                String sig = userService.getPersonalSignature(uid);
+                info.setPersonalSignature(sig);
+            } catch (Throwable ignore) {
+                log.debug("getPersonalSignature not available or failed for userId={}: {}", uid, ignore.getMessage());
+                info.setPersonalSignature(null);
+            }
+
+            return info;
+        };
+
+        // 1) If Authorization header already has a valid access token, accept it and return user info
         if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
             String accessToken = authorizationHeader.substring("Bearer ".length()).trim();
             try {
                 if (jwtService.validateToken(accessToken) && jwtService.isAccessToken(accessToken)) {
                     Long userId = jwtService.extractUserId(accessToken);
                     userService.onLoginSuccess(userId);
+
+                    // return user info payload and keep New-Access-Token header for convenience
                     response.setHeader("New-Access-Token", accessToken);
-                    return ResponseEntity.ok(Result.success("已登录(基于 Authorization header)"));
+                    UserInfoDTO dto = buildUserInfo.apply(userId);
+                    return ResponseEntity.ok(Result.success(dto));
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // fall through to other login flows
+                log.debug("authorization header login attempt failed: {}", ignored.getMessage());
+            }
         }
+
+        // 2) Try refresh token cookie
         if (refreshToken != null) {
             try {
                 if (jwtService.isRefreshToken(refreshToken) && jwtService.validateToken(refreshToken)) {
@@ -71,27 +130,36 @@ public class UserController {
                         String newRefreshJti = jwtService.extractJti(newPair.refreshToken());
                         boolean rotated = refreshTokenService.rotateRefreshTokenAtomic(oldJti, newRefreshJti, userId, jwtService.getRefreshExpirationMillis());
                         if (!rotated) {
+                            failUserInfoDTO.setUsername("Refresh token 无效或已被使用");
                             return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode())
-                                    .body(Result.fail(ResultCode.UNAUTHORIZED, "Refresh token 无效或已被使用"));
+                                    .body(Result.fail(ResultCode.UNAUTHORIZED, failUserInfoDTO));
                         }
                         JwtCookieUtil.writeRefreshCookie(response, newPair.refreshToken(), jwtService, jwtProperties);
                         response.setHeader("New-Access-Token", newPair.accessToken());
                         userService.onLoginSuccess(userId);
-                        return ResponseEntity.ok(Result.success("通过 refresh 自动登录"));
+
+                        UserInfoDTO dto = buildUserInfo.apply(userId);
+                        return ResponseEntity.ok(Result.success(dto));
                     }
                 }
             } catch (Exception e) {
+                failUserInfoDTO.setUsername("Refresh token 解析/旋转失败");
                 return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode())
-                        .body(Result.fail(ResultCode.UNAUTHORIZED, "Refresh token 解析/旋转失败"));
+                        .body(Result.fail(ResultCode.UNAUTHORIZED, failUserInfoDTO));
             }
         }
+
+        // 3) Credential login (username/password)
         if (loginDTO == null) {
-            return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, "需要凭证登录"));
+            failUserInfoDTO.setUsername("需要凭证登录");
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, failUserInfoDTO));
         }
         Long userId = userService.authenticateAndGetId(loginDTO.getUsernameOrEmail(), loginDTO.getPassword());
         if (userId == null) {
-            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(Result.fail(ResultCode.UNAUTHORIZED, "凭证无效，登录失败"));
+            failUserInfoDTO.setUsername("凭证无效，登录失败");
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(Result.fail(ResultCode.UNAUTHORIZED, failUserInfoDTO));
         }
+
         String username = userService.getUsernameById(userId);
         var pair = jwtService.createTokenPair(userId, username);
         String refreshJti = jwtService.extractJti(pair.refreshToken());
@@ -99,7 +167,9 @@ public class UserController {
         JwtCookieUtil.writeRefreshCookie(response, pair.refreshToken(), jwtService, jwtProperties);
         response.setHeader("New-Access-Token", pair.accessToken());
         userService.onLoginSuccess(userId);
-        return ResponseEntity.ok(Result.success("登录成功"));
+
+        UserInfoDTO dto = buildUserInfo.apply(userId);
+        return ResponseEntity.ok(Result.success(dto));
     }
 
     @Operation(summary = "注册新用户", description = "注册并立即登录（返回 access token 到 header，refresh 写入 HttpOnly cookie）")
@@ -190,16 +260,68 @@ public class UserController {
         }
     }
 
-    @Operation(summary = "上传用户头像" , description = "拿取用户id和attachmentId,绑定attachment和用户头像")
+    @Operation(summary = "上传用户头像绑定", description = "把已上传的 attachmentId 绑定为当前用户的头像（需登录）")
     @PostMapping("/userAvatar")
-    public ResponseEntity<?> postUserAvatar(@CurrentUser Long userId, Long attachmentId) {
-        if (attachmentId == null) {
-            return ResponseEntity.status(ResultCode.BAD_REQUEST.getCode()).body("attachmentId is null");
+    public ResponseEntity<?> postUserAvatar(@CurrentUser Long userId,
+                                            @RequestBody AvatarBindDTO req) {
+        if (userId == null) {
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(Result.fail(ResultCode.UNAUTHORIZED, "未授权"));
         }
-        if (postUserAvatar(userId, attachmentId) == null) {
-            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body("postUserAvatar failed");
+        if (req == null || req.getAttachmentId() == null) {
+            return ResponseEntity.status(ResultCode.BAD_REQUEST.getCode()).body(Result.fail(ResultCode.BAD_REQUEST, "attachmentId is required"));
         }
-        return ResponseEntity.status(ResultCode.SUCCESS.getCode()).body("success post userAvatar");
+
+        Long attachmentId = req.getAttachmentId();
+
+        // 1) 检查 attachment 是否存在
+        com.anime.common.entity.attachment.Attachment a;
+        try {
+            a = attachmentService.getAttachmentById(attachmentId);
+        } catch (Exception ex) {
+            log.warn("postUserAvatar: failed to query attachment {}: {}", attachmentId, ex.getMessage());
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, "附件查询失败"));
+        }
+        if (a == null) {
+            return ResponseEntity.status(ResultCode.BAD_REQUEST.getCode()).body(Result.fail(ResultCode.BAD_REQUEST, "attachment not found"));
+        }
+
+        // 2) 校验归属（防止把别人的附件绑定为自己的头像）
+        Long uploadedBy = a.getUploadedBy();
+        if (uploadedBy == null || !uploadedBy.equals(userId)) {
+            // 如果业务允许管理员等特殊角色可绑定他人附件，可在此添加额外判断
+            return ResponseEntity.status(ResultCode.FORBIDDEN.getCode()).body(Result.fail(ResultCode.FORBIDDEN, "attachment not owned by user"));
+        }
+
+        // 3) 校验 attachment 状态（可按业务调整为只允许 status == "available"）
+        String status = a.getStatus();
+        if (status == null || !(status.equalsIgnoreCase("available") || status.equalsIgnoreCase("uploading"))) {
+            return ResponseEntity.status(ResultCode.BAD_REQUEST.getCode()).body(Result.fail(ResultCode.BAD_REQUEST, "attachment status not valid for binding"));
+        }
+
+        // 4) 调用 service 更新用户 avatar（当前实现 userService.PostUserAvatar 会写入 DB）
+        try {
+            Boolean ok = userService.PostUserAvatar(userId, attachmentId);
+            if (Boolean.TRUE.equals(ok)) {
+                // 返回新的 avatar presigned url 给前端做确认/预览（可选）
+                String avatarUrl = null;
+                try {
+                    avatarUrl = attachmentService.generatePresignedGetUrl(attachmentId, 300L);
+                } catch (Exception e) {
+                    log.debug("postUserAvatar: presigned-get failed for {}: {}", attachmentId, e.getMessage());
+                }
+                java.util.Map<String, Object> resp = new java.util.HashMap<>();
+                resp.put("attachmentId", attachmentId);
+                resp.put("avatarUrl", avatarUrl);
+                return ResponseEntity.ok(Result.success(resp));
+            } else {
+                return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, "绑定失败"));
+            }
+        } catch (IllegalArgumentException iae) {
+            return ResponseEntity.status(ResultCode.BAD_REQUEST.getCode()).body(Result.fail(ResultCode.BAD_REQUEST, iae.getMessage()));
+        } catch (Exception ex) {
+            log.error("postUserAvatar failed userId={} attachmentId={} : {}", userId, attachmentId, ex.getMessage(), ex);
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, "绑定失败"));
+        }
     }
 
     @Operation(summary = "ping", description = "用于心跳/测试 auth（返回 pong）")
