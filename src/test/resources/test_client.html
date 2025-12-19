@@ -3,167 +3,124 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Anime - 测试客户端 (full API test)</title>
+    <title>Anime - 测试客户端 (login / presign / upload / diary / user avatar)</title>
     <style>
-        body { font-family: Arial, Helvetica, sans-serif; padding: 20px; max-width: 1200px; margin: auto; }
-        input, button, textarea, select { font-size: 14px; margin: 4px 0; }
+        body { font-family: Arial, Helvetica, sans-serif; padding: 20px; max-width: 1000px; margin: auto; }
+        input, button, textarea { font-size: 14px; margin: 4px 0; }
         .box { border: 1px solid #ddd; padding: 12px; margin: 12px 0; border-radius: 6px; }
-        .log { white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 4px; max-height: 360px; overflow:auto; }
+        .log { white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 4px; max-height: 240px; overflow:auto; }
         label { display:block; margin-top:8px; }
+        .diary-header { margin: 8px 0; padding: 8px; border-bottom: 1px solid #eee; }
+        .blocks { margin-top: 12px; }
+        .block { border: 1px solid #eee; padding: 8px; margin: 8px 0; border-radius: 6px; display:flex; gap:12px; align-items:flex-start; }
+        .block img { max-width: 320px; max-height: 240px; object-fit:contain; border-radius:4px; }
+        .avatar-preview { max-width: 160px; max-height:160px; border:1px solid #ccc; border-radius:6px; display:block; margin-top:8px; }
         .placeholder { color:#999; font-size:13px; }
         .user-info { display:flex; gap:12px; align-items:center; }
+        .user-info .meta { font-size:14px; }
+        .user-info .meta .name { font-weight:600; font-size:16px; }
         .user-info img { width:64px; height:64px; object-fit:cover; border-radius:50%; border:1px solid #ddd; }
-        .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-        .col { flex:1 1 300px; min-width:220px; }
-        table { border-collapse: collapse; width:100%; }
-        th, td { border: 1px solid #eee; padding:6px; text-align:left; font-size:13px; }
     </style>
 </head>
 <body>
-<h2>测试客户端：全接口（分业务区域）</h2>
+<h2>测试客户端：登录 / presign / upload / diary / user avatar</h2>
 
-<!-- User info -->
 <div class="box">
     <h3>当前用户</h3>
-    <div class="user-info">
+    <div id="userInfo" class="user-info">
         <img id="userAvatarSmall" src="" alt="avatar" style="display:none;">
-        <div>
-            <div id="userName" style="font-weight:600">未登录</div>
+        <div class="meta">
+            <div class="name" id="userName">未登录</div>
             <div id="userSignature" class="placeholder"></div>
-            <div id="userId" class="placeholder"></div>
         </div>
     </div>
 </div>
 
-<!-- Auth (login/register/refresh/logout/ping) -->
 <div class="box">
-    <h3>Auth 测试（登录/注册/刷新/登出/ping）</h3>
-    <div class="row">
-        <div class="col">
-            <label>用户名或邮箱：<input id="username" value="test_name"></label>
-            <label>密码：<input id="password" type="password" value="test_password"></label>
-            <label>邮箱(for register)：<input id="regEmail" value="test_email"></label>
-            <div class="row">
-                <button id="btnLogin">登录</button>
-                <button id="btnRegister">注册</button>
-                <button id="btnRefresh">刷新 token</button>
-                <button id="btnLogout">登出</button>
-                <button id="btnPing">Ping</button>
-            </div>
-        </div>
-    </div>
+    <h3>1) 登录（会写 refreshToken cookie，返回 access token 到 header）</h3>
+    <label>用户名或邮箱：<input id="username" value="test_name"></label>
+    <label>密码：<input id="password" type="password" value="test_password"></label>
+    <button id="btnLogin">登录 (POST /api/user/login)</button>
+    <p>说明：登录后会把 access token 存到内存 (accessToken)，refresh token 写入 HttpOnly cookie。</p>
 </div>
 
-<!-- User avatar presign/upload/bind (already present) -->
 <div class="box">
-    <h3>User Avatar 流程（presign -> PUT -> complete -> bind）</h3>
-    <div class="row">
-        <input type="file" id="avatarFileInput" accept="image/*">
-        <input id="avatarOrigName" placeholder="avatar.jpg">
-        <button id="btnUserPresignUpload">Presign & Upload (/api/user/presign)</button>
-        <button id="btnBindAvatar" disabled>绑定头像 (/api/user/userAvatar)</button>
-    </div>
+    <h3>2) 刷新 access token（使用 refresh cookie）</h3>
+    <button id="btnRefresh">刷新 (POST /api/auth/refresh)</button>
+    <p>说明：请求会带 cookie（需 credentials: 'include'），服务器从 refreshToken cookie 读取并返回新的 access token。</p>
+</div>
+
+<div class="box">
+    <h3>2.1) WhoAmI - 验证当前 token 是否生效</h3>
+    <button id="btnWhoami">WhoAmI</button>
+</div>
+
+<div class="box">
+    <h3>3) 选择图片（共用 file input for general uploads）</h3>
+    <input type="file" id="fileInput" accept="image/*">
+    <label>原始文件名（可选）：<input id="origName" placeholder="保留原文件名用于 metadata"></label>
+</div>
+
+<div class="box">
+    <h3>4) /api/attachments/presign - 获取 presign 并上传</h3>
+    <button id="btnPresignUpload">获取 presign 并上传 (/api/attachments/presign)</button>
+</div>
+
+<div class="box">
+    <h3>4.1) /api/diary/presign - Diary 专用 presign 并上传</h3>
+    <label>可选原始文件名（默认使用选中文件名）：<input id="diaryOrigName" placeholder="原始文件名"></label>
+    <button id="btnDiaryPresignUpload">获取 presign 并上传 (/api/diary/presign)</button>
+</div>
+
+<!-- New: User avatar upload section (independent) -->
+<div class="box">
+    <h3>U) 上传用户头像（独立于其它 presign/upload 流程）</h3>
+    <p>流程：选择头像 -> 请求 /api/user/presign -> 上传 PUT 到 presigned URL -> 调用 /api/attachments/complete -> 调用 /api/user/userAvatar 绑定头像</p>
+    <input type="file" id="avatarFileInput" accept="image/*">
+    <label>可选原始文件名（avatar）：<input id="avatarOrigName" placeholder="avatar.jpg"></label>
     <div style="margin-top:8px;">
-        <span>最近 attachmentId: <span id="avatarAttachmentId">-</span></span>
-        <img id="avatarPreview" class="avatar-preview" style="display:none;max-width:120px;margin-left:12px;">
+        <button id="btnUserPresignUpload">获取 presign 并上传 (/api/user/presign)</button>
+        <button id="btnBindAvatar" disabled>绑定头像到用户 (/api/user/userAvatar)</button>
+    </div>
+    <div id="avatarInfo" style="margin-top:8px;">
+        <div>最近上传的 attachmentId: <span id="avatarAttachmentId">-</span></div>
+        <img id="avatarPreview" class="avatar-preview" src="" alt="avatar preview" style="display:none;">
     </div>
 </div>
 
-<!-- Attachment tests -->
 <div class="box">
-    <h3>Attachment 测试</h3>
-    <div class="row">
-        <input id="attachmentsIdForGet" placeholder="attachmentId for presigned-get">
-        <button id="btnPresignedGet">获取 presigned-get (/api/attachments/{id}/presigned-get)</button>
-        <button id="btnAttachmentsPresign">通用 presign (/api/attachments/presign) - 使用 fileInput 上方选中文件</button>
-    </div>
+    <h3>5) 保存日记（POST /api/diary/save）</h3>
+    <label>Diary Title: <input id="diaryTitle" value="测试日记"></label>
+    <label>Diary ID (更新时填写): <input id="diaryId" placeholder="留空表示新建"></label>
+    <label>Diary Version (更新时填写): <input id="diaryVersion" placeholder="更新用"></label>
+
+    <h4>Blocks JSON (示例)</h4>
+    <textarea id="blocksJson" rows="6" style="width:100%;">[
+  {"blockId": null, "type":"text","content":"这是一个测试文本块","attachmentId":null,"metadata":null},
+  {"blockId": null, "type":"image","content":null,"attachmentId":null,"metadata":null}
+]</textarea>
+    <button id="btnSaveDiary">保存日记 (POST /api/diary/save)</button>
 </div>
 
-<!-- Diary tests -->
 <div class="box">
-    <h3>Diary 测试</h3>
-    <div class="row">
-        <button id="btnGetMyDiaries">获取我的日记摘要 (/api/diary/getMyDiary)</button>
-        <input id="dateForDiaries" placeholder="yyyy-mm-dd">
-        <button id="btnGetDiariesByDate">按日期获取 (/api/diary/date/{date})</button>
-    </div>
-    <div style="margin-top:8px;">
-        <input id="diaryIdToDelete" placeholder="diaryId to delete">
-        <button id="btnDeleteDiary">删除日记 (/api/diary/delete/{id})</button>
+    <h3>6) 获取日记（GET /api/diary/id/{id}）并在页面显示（包含图片）</h3>
+    <label>Diary ID: <input id="qryDiaryId"></label>
+    <button id="btnGetDiary">获取并显示日记</button>
+
+    <div id="diaryDisplay" style="margin-top:12px;">
+        <div id="diaryInfo" class="diary-header"></div>
+        <div id="blocksContainer" class="blocks"></div>
     </div>
 </div>
 
-<!-- Collection Folder Level1 tests -->
-<div class="box">
-    <h3>收藏夹 Level1 测试</h3>
-    <div class="row">
-        <input id="lvl1Name" placeholder="folder name">
-        <input id="lvl1AttachmentId" placeholder="cover attachmentId">
-        <button id="btnCreateLevel1">创建一级收藏夹（createNewFolder）</button>
-        <button id="btnGetUserFolders">获取我的一级收藏夹 (/getUserFolders)</button>
-    </div>
-    <div style="margin-top:8px;">
-        <input id="lvl1Id" placeholder="level1 id">
-        <input id="lvl1NewName" placeholder="new name">
-        <button id="btnUpdateLevel1Name">更新名称</button>
-        <input id="lvl1UpdateCoverAttachment" placeholder="new cover attachmentId">
-        <button id="btnUpdateLevel1Cover">更新封面</button>
-        <button id="btnDeleteLevel1">删除一级收藏夹</button>
-    </div>
-</div>
-
-<!-- Collection Folder Level2 tests -->
-<div class="box">
-    <h3>收藏夹 Level2 测试</h3>
-    <div class="row">
-        <input id="lvl2Name" placeholder="level2 name">
-        <input id="lvl2ParentId" placeholder="father level1 id">
-        <button id="btnCreateLevel2">创建二级收藏夹</button>
-        <input id="lvl2QueryParent" placeholder="parent id for getFoldersByParent">
-        <button id="btnGetLevel2ByParent">获取父级下的二级收藏夹</button>
-    </div>
-    <div style="margin-top:8px;">
-        <input id="lvl2Id" placeholder="level2 id">
-        <input id="lvl2NewName" placeholder="new name">
-        <button id="btnUpdateLevel2Name">更新二级名称</button>
-        <button id="btnDeleteLevel2">删除二级收藏夹</button>
-    </div>
-</div>
-
-<!-- Collected Item tests -->
-<div class="box">
-    <h3>Collected Item 测试</h3>
-    <div class="row">
-        <input id="itemAttachmentId" placeholder="attachment id for item">
-        <input id="itemName" placeholder="item name">
-        <input id="itemDescription" placeholder="description">
-        <input id="itemFatherLevel2Id" placeholder="father_level2_id">
-        <button id="btnCreateItemCustom">创建自定义收藏项</button>
-        <button id="btnCreateItemDefault">创建默认收藏项</button>
-    </div>
-    <div style="margin-top:8px;">
-        <input id="itemId" placeholder="item id">
-        <input id="itemNewName" placeholder="new name">
-        <input id="itemNewDesc" placeholder="new desc">
-        <input id="itemNewCoverAttachment" placeholder="new cover attachment id">
-        <div class="row">
-            <button id="btnUpdateItemName">更新名称</button>
-            <button id="btnUpdateItemDesc">更新描述</button>
-            <button id="btnUpdateItemCover">更新封面</button>
-            <button id="btnDeleteItem">删除收藏项</button>
-        </div>
-    </div>
-</div>
-
-<!-- Log -->
 <div class="box">
     <h3>日志 / 响应</h3>
     <div id="log" class="log"></div>
 </div>
 
 <script>
-    const BASE = 'https://localhost:8443';
     let currentAccessToken = null;
+    const BASE = 'https://localhost:8443';
     let lastAvatarAttachmentId = null;
 
     function log(msg) {
@@ -173,27 +130,32 @@
     }
 
     function authHeaders() {
-        const h = {};
-        if (currentAccessToken) h['Authorization'] = 'Bearer ' + currentAccessToken;
-        return h;
+        const headers = {};
+        if (currentAccessToken) headers['Authorization'] = 'Bearer ' + currentAccessToken;
+        return headers;
     }
 
-    function setUserInfoFromPayload(payload) {
-        if (!payload) return;
-        document.getElementById('userName').textContent = payload.username || ('user-' + (payload.id || ''));
-        document.getElementById('userSignature').textContent = payload.personalSignature || '';
-        document.getElementById('userId').textContent = payload.id ? `userId: ${payload.id}` : '';
-        const avatar = payload.userAvatarUrl;
+    function showUserInfo(user) {
+        if (!user) {
+            document.getElementById('userName').textContent = '未登录';
+            document.getElementById('userSignature').textContent = '';
+            document.getElementById('userAvatarSmall').style.display = 'none';
+            return;
+        }
+        const name = user.username || ('user-' + (user.id || ''));
+        document.getElementById('userName').textContent = name;
+        const sig = user.personalSignature || '';
+        document.getElementById('userSignature').textContent = sig;
         const avatarEl = document.getElementById('userAvatarSmall');
-        if (avatar) {
-            avatarEl.src = avatar;
+        if (user.userAvatarUrl) {
+            avatarEl.src = user.userAvatarUrl;
             avatarEl.style.display = 'block';
         } else {
             avatarEl.style.display = 'none';
         }
     }
 
-    // ------------------- Auth handlers -------------------
+    // Login
     document.getElementById('btnLogin').addEventListener('click', async () => {
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
@@ -201,392 +163,83 @@
             const res = await fetch(`${BASE}/api/user/login`, {
                 method: 'POST',
                 credentials: 'include',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ usernameOrEmail: username, password })
             });
             const text = await res.text();
             log(`[login] status=${res.status} body=${text}`);
-            const headerToken = res.headers.get('New-Access-Token');
-            if (headerToken) {
-                currentAccessToken = headerToken;
-                log('[login] saved New-Access-Token from header');
+
+            // try to get New-Access-Token header first
+            const newAccess = res.headers.get('New-Access-Token');
+            if (newAccess) {
+                currentAccessToken = newAccess;
+                log('[login] got New-Access-Token header -> saved to memory');
             }
-            try {
-                const json = JSON.parse(text);
-                const data = json.data || json;
-                if (data && (data.username || data.userAvatarUrl || data.personalSignature)) {
-                    setUserInfoFromPayload(data);
+
+            // parse JSON body to show user info (Result<UserInfoDTO>)
+            let json = null;
+            try { json = JSON.parse(text); } catch(e){ json = null; }
+            if (json) {
+                // Result may wrap in { isSuccess, code, message, data }
+                const payload = json.data !== undefined ? json.data : json;
+                if (payload && typeof payload === 'object') {
+                    // If payload contains accessToken (unlikely for /api/user/login), handle it
+                    if (payload.accessToken && !currentAccessToken) {
+                        currentAccessToken = payload.accessToken;
+                        log('[login] got accessToken from body -> saved to memory');
+                    }
+                    // Show user info if the payload is a user info object
+                    // Heuristic: presence of username or userAvatarUrl
+                    if (payload.username || payload.userAvatarUrl || payload.personalSignature) {
+                        showUserInfo(payload);
+                    }
                 }
-            } catch(e){}
-        } catch (e) { log('[login] error: ' + e.message); }
+            }
+
+        } catch (e) {
+            log('[login] error: ' + e.message);
+        }
     });
 
-    document.getElementById('btnRegister').addEventListener('click', async () => {
-        const username = document.getElementById('username').value;
-        const pwd = document.getElementById('password').value;
-        const email = document.getElementById('regEmail').value;
-        try {
-            const res = await fetch(`${BASE}/api/user/register`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username, password: pwd, confirmPassword: pwd, email })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[register] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[register] error: '+e.message); }
-    });
-
+    // Refresh
     document.getElementById('btnRefresh').addEventListener('click', async () => {
         try {
             const res = await fetch(`${BASE}/api/auth/refresh`, {
                 method: 'POST',
                 credentials: 'include',
-                headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
             });
             const json = await res.json().catch(()=>null);
             log(`[refresh] status=${res.status} body=${JSON.stringify(json)}`);
             const headerToken = res.headers.get('New-Access-Token');
             if (headerToken) {
                 currentAccessToken = headerToken;
-                log('[refresh] saved New-Access-Token from header');
+                log('[refresh] got New-Access-Token -> saved to memory');
             } else if (json && json.data && json.data.accessToken) {
                 currentAccessToken = json.data.accessToken;
-                log('[refresh] saved accessToken from body');
+                log('[refresh] got accessToken in body -> saved to memory');
             }
-            if (json && json.data && (json.data.username || json.data.userAvatarUrl)) {
-                setUserInfoFromPayload(json.data);
-            }
-        } catch(e){ log('[refresh] error: ' + e.message); }
+        } catch (e) {
+            log('[refresh] error: ' + e.message);
+        }
     });
 
-    document.getElementById('btnLogout').addEventListener('click', async () => {
+    // WhoAmI
+    document.getElementById('btnWhoami').addEventListener('click', async () => {
         try {
-            const res = await fetch(`${BASE}/api/user/logout`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders())
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[logout] status=${res.status} body=${JSON.stringify(json)}`);
-            currentAccessToken = null;
-            setUserInfoFromPayload(null);
-        } catch(e){ log('[logout] error: ' + e.message); }
-    });
-
-    document.getElementById('btnPing').addEventListener('click', async () => {
-        try {
-            const res = await fetch(`${BASE}/api/user/ping`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders())
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[ping] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[ping] error: ' + e.message); }
-    });
-
-    // ------------------- Attachment handlers -------------------
-    document.getElementById('btnPresignedGet').addEventListener('click', async () => {
-        const id = document.getElementById('attachmentsIdForGet').value;
-        if (!id) { alert('请输入 attachmentId'); return; }
-        try {
-            const res = await fetch(`${BASE}/api/attachments/${id}/presigned-get?expiry=300`, {
+            const res = await fetch(`${BASE}/api/test/whoami`, {
                 method: 'GET',
-                credentials: 'include',
-                headers: Object.assign({}, authHeaders())
+                headers: Object.assign({}, authHeaders()),
+                credentials: 'include'
             });
-            const json = await res.json().catch(()=>null);
-            log(`[presigned-get] status=${res.status} body=${JSON.stringify(json)}`);
-            if (json && json.url) {
-                window.open(json.url, '_blank');
-            }
-        } catch(e){ log('[presigned-get] error: ' + e.message); }
+            const text = await res.text().catch(()=>null);
+            log(`[whoami] status=${res.status} body=${text}`);
+        } catch (e) {
+            log('[whoami] error: ' + e.message);
+        }
     });
 
-    document.getElementById('btnAttachmentsPresign').addEventListener('click', async () => {
-        const f = document.getElementById('fileInput') ? document.getElementById('fileInput').files[0] : null;
-        if (!f) { alert('请选择文件 (上方 file input)'); return; }
-        const orig = document.getElementById('origName') ? document.getElementById('origName').value || f.name : f.name;
-        const req = { storagePath: null, originalFilename: orig, contentType: f.type || 'application/octet-stream' };
-        try {
-            const res = await fetch(`${BASE}/api/attachments/presign`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
-                body: JSON.stringify(req)
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[attachments presign] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[attachments presign] error: ' + e.message); }
-    });
-
-    // ------------------- Diary handlers -------------------
-    document.getElementById('btnGetMyDiaries').addEventListener('click', async () => {
-        try {
-            const res = await fetch(`${BASE}/api/diary/getMyDiary`, {
-                method: 'GET',
-                credentials: 'include',
-                headers: Object.assign({}, authHeaders())
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[getMyDiary] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[getMyDiary] error: ' + e.message); }
-    });
-
-    document.getElementById('btnGetDiariesByDate').addEventListener('click', async () => {
-        const d = document.getElementById('dateForDiaries').value;
-        if (!d) { alert('请输入日期 yyyy-mm-dd'); return; }
-        try {
-            const res = await fetch(`${BASE}/api/diary/date/${encodeURIComponent(d)}`, {
-                method: 'GET',
-                credentials: 'include',
-                headers: Object.assign({}, authHeaders())
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[getDiariesByDate] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[getDiariesByDate] error: ' + e.message); }
-    });
-
-    document.getElementById('btnDeleteDiary').addEventListener('click', async () => {
-        const id = document.getElementById('diaryIdToDelete').value;
-        if (!id) { alert('请输入 diary id'); return; }
-        try {
-            const res = await fetch(`${BASE}/api/diary/delete/${id}`, {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: Object.assign({}, authHeaders())
-            });
-            const text = await res.text();
-            log(`[deleteDiary] status=${res.status} body=${text}`);
-        } catch(e){ log('[deleteDiary] error: ' + e.message); }
-    });
-
-    // ------------------- Level1 handlers -------------------
-    document.getElementById('btnCreateLevel1').addEventListener('click', async () => {
-        const name = document.getElementById('lvl1Name').value;
-        const attach = Number(document.getElementById('lvl1AttachmentId').value || 0);
-        const req = { name, attachmentId: attach, userId: null };
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level1/createNewFolder`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify(req)
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[createLevel1] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[createLevel1] error: ' + e.message); }
-    });
-
-    document.getElementById('btnGetUserFolders').addEventListener('click', async () => {
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level1/getUserFolders`, {
-                method: 'GET',
-                credentials: 'include',
-                headers: Object.assign({}, authHeaders())
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[getUserFolders] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[getUserFolders] error: ' + e.message); }
-    });
-
-    document.getElementById('btnUpdateLevel1Name').addEventListener('click', async () => {
-        const id = Number(document.getElementById('lvl1Id').value || 0);
-        const name = document.getElementById('lvl1NewName').value;
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level1/updateFolderName`, {
-                method: 'PUT',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id, name })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[updateLevel1Name] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[updateLevel1Name] error: ' + e.message); }
-    });
-
-    document.getElementById('btnUpdateLevel1Cover').addEventListener('click', async () => {
-        const id = Number(document.getElementById('lvl1Id').value || 0);
-        const attachment_id = Number(document.getElementById('lvl1UpdateCoverAttachment').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level1/updateFolderCover`, {
-                method: 'PUT',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id, attachment_id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[updateLevel1Cover] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[updateLevel1Cover] error: ' + e.message); }
-    });
-
-    document.getElementById('btnDeleteLevel1').addEventListener('click', async () => {
-        const id = Number(document.getElementById('lvl1Id').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level1/deleteFolder`, {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[deleteLevel1] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[deleteLevel1] error: ' + e.message); }
-    });
-
-    // ------------------- Level2 handlers -------------------
-    document.getElementById('btnCreateLevel2').addEventListener('click', async () => {
-        const name = document.getElementById('lvl2Name').value;
-        const father_id = Number(document.getElementById('lvl2ParentId').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level2/createDefaultFolder`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ father_id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[createLevel2] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[createLevel2] error: ' + e.message); }
-    });
-
-    document.getElementById('btnGetLevel2ByParent').addEventListener('click', async () => {
-        const father_id = Number(document.getElementById('lvl2QueryParent').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level2/getFoldersByParent`, {
-                method: 'GET',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ father_id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[getLevel2ByParent] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[getLevel2ByParent] error: ' + e.message); }
-    });
-
-    document.getElementById('btnUpdateLevel2Name').addEventListener('click', async () => {
-        const id = Number(document.getElementById('lvl2Id').value || 0);
-        const name = document.getElementById('lvl2NewName').value;
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level2/updateFolderName`, {
-                method: 'PUT',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id, name })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[updateLevel2Name] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[updateLevel2Name] error: ' + e.message); }
-    });
-
-    document.getElementById('btnDeleteLevel2').addEventListener('click', async () => {
-        const id = Number(document.getElementById('lvl2Id').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/folder/level2/deleteFolder`, {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[deleteLevel2] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[deleteLevel2] error: ' + e.message); }
-    });
-
-    // ------------------- Collected Item handlers -------------------
-    document.getElementById('btnCreateItemCustom').addEventListener('click', async () => {
-        const attachment_id = Number(document.getElementById('itemAttachmentId').value || 0);
-        const name = document.getElementById('itemName').value;
-        const description = document.getElementById('itemDescription').value;
-        const father_level2_id = Number(document.getElementById('itemFatherLevel2Id').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/item/createCustom`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ attachment_id, name, description, father_level2_id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[createItemCustom] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[createItemCustom] error: ' + e.message); }
-    });
-
-    document.getElementById('btnCreateItemDefault').addEventListener('click', async () => {
-        const description = document.getElementById('itemDescription').value;
-        const father_level2_id = Number(document.getElementById('itemFatherLevel2Id').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/item/createDefault`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ description, father_level2_id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[createItemDefault] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[createItemDefault] error: ' + e.message); }
-    });
-
-    document.getElementById('btnUpdateItemName').addEventListener('click', async () => {
-        const id = Number(document.getElementById('itemId').value || 0);
-        const name = document.getElementById('itemNewName').value;
-        try {
-            const res = await fetch(`${BASE}/api/collection/item/update/name`, {
-                method: 'PUT',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id, name })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[updateItemName] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[updateItemName] error: ' + e.message); }
-    });
-
-    document.getElementById('btnUpdateItemDesc').addEventListener('click', async () => {
-        const id = Number(document.getElementById('itemId').value || 0);
-        const description = document.getElementById('itemNewDesc').value;
-        try {
-            const res = await fetch(`${BASE}/api/collection/item/update/description`, {
-                method: 'PUT',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id, description })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[updateItemDesc] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[updateItemDesc] error: ' + e.message); }
-    });
-
-    document.getElementById('btnUpdateItemCover').addEventListener('click', async () => {
-        const id = Number(document.getElementById('itemId').value || 0);
-        const attachment_id = Number(document.getElementById('itemNewCoverAttachment').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/item/update/cover`, {
-                method: 'PUT',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id, attachment_id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[updateItemCover] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[updateItemCover] error: ' + e.message); }
-    });
-
-    document.getElementById('btnDeleteItem').addEventListener('click', async () => {
-        const id = Number(document.getElementById('itemId').value || 0);
-        try {
-            const res = await fetch(`${BASE}/api/collection/item/delete`, {
-                method: 'DELETE',
-                credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ id })
-            });
-            const json = await res.json().catch(()=>null);
-            log(`[deleteItem] status=${res.status} body=${JSON.stringify(json)}`);
-        } catch(e){ log('[deleteItem] error: ' + e.message); }
-    });
-
-    // ------------------- User avatar upload & bind reuse -------------------
+    // Common upload helper used by flows
     async function uploadToPresigned(putUrl, putHeaders, file, contentType) {
         const uploadHeaders = {};
         for (const k in putHeaders) {
@@ -594,80 +247,346 @@
             uploadHeaders[k] = putHeaders[k];
         }
         uploadHeaders['Content-Type'] = contentType;
-        const uploadRes = await fetch(putUrl, { method: 'PUT', headers: uploadHeaders, body: file });
+
+        const uploadRes = await fetch(putUrl, {
+            method: 'PUT',
+            headers: uploadHeaders,
+            body: file,
+        });
+
         log(`[upload] PUT -> status=${uploadRes.status} ${uploadRes.statusText}`);
-        return uploadRes.ok;
+        if (!uploadRes.ok) {
+            const text = await uploadRes.text().catch(()=>null);
+            log('[upload] upload failed; response text: ' + text);
+            return false;
+        }
+        return true;
     }
 
+    // /api/attachments/presign
+    document.getElementById('btnPresignUpload').addEventListener('click', async () => {
+        const f = document.getElementById('fileInput').files[0];
+        if (!f) { alert('请选择文件'); return; }
+        const orig = document.getElementById('origName').value || f.name;
+        const contentType = f.type || 'application/octet-stream';
+        const presignReq = { storagePath: null, originalFilename: orig, contentType: contentType, uploadedBy: null, width: null, height: null };
+        try {
+            const res = await fetch(`${BASE}/api/attachments/presign`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify(presignReq)
+            });
+            const resp = await res.json().catch(()=>null);
+            log(`[presign] status=${res.status} body=${JSON.stringify(resp)}`);
+            if (!res.ok) return;
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+            const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if (!ok) return;
+            log(`[presign] upload successful. attachmentId=${attachmentId}`);
+            // finalize
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId })
+            });
+            const completeBody = await completeRes.json().catch(()=>null);
+            log(`[complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
+        } catch (e) {
+            log('[presign/upload] error: ' + e.message);
+        }
+    });
+
+    // /api/diary/presign
+    document.getElementById('btnDiaryPresignUpload').addEventListener('click', async () => {
+        const f = document.getElementById('fileInput').files[0];
+        if (!f) { alert('请选择文件'); return; }
+        const orig = document.getElementById('diaryOrigName').value || f.name;
+        const contentType = f.type || 'application/octet-stream';
+        const presignReq = { originalFilename: orig, mimeType: contentType };
+        try {
+            const res = await fetch(`${BASE}/api/diary/presign`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify(presignReq)
+            });
+            const resp = await res.json().catch(()=>null);
+            log(`[diary presign] status=${res.status} body=${JSON.stringify(resp)}`);
+            if (!res.ok) return;
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+            const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if (!ok) return;
+            log(`[diary presign] upload successful. attachmentId=${attachmentId}`);
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId })
+            });
+            const completeBody = await completeRes.json().catch(()=>null);
+            log(`[diary complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
+            if (completeRes.ok) {
+                const blocksEl = document.getElementById('blocksJson');
+                try {
+                    const arr = JSON.parse(blocksEl.value);
+                    for (let i = 0; i < arr.length; i++) {
+                        if (arr[i].attachmentId == null) {
+                            arr[i].attachmentId = attachmentId;
+                            break;
+                        }
+                    }
+                    blocksEl.value = JSON.stringify(arr, null, 2);
+                } catch(e){}
+            }
+        } catch (e) {
+            log('[diary presign/upload] error: ' + e.message);
+        }
+    });
+
+    // New: User avatar presign & upload (independent)
     document.getElementById('btnUserPresignUpload').addEventListener('click', async () => {
         const f = document.getElementById('avatarFileInput').files[0];
-        if (!f) { alert('请选择文件'); return; }
+        if (!f) { alert('请选择头像文件'); return; }
         const orig = document.getElementById('avatarOrigName').value || f.name;
         const contentType = f.type || 'application/octet-stream';
+        const presignReq = { originalFilename: orig, mimeType: contentType };
+
         try {
             const res = await fetch(`${BASE}/api/user/presign`, {
                 method: 'POST',
                 credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ originalFilename: orig, mimeType: contentType })
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                body: JSON.stringify(presignReq)
             });
-            const json = await res.json().catch(()=>null);
-            log(`[user presign] status=${res.status} body=${JSON.stringify(json)}`);
+            const resp = await res.json().catch(()=>null);
+            log(`[user presign] status=${res.status} body=${JSON.stringify(resp)}`);
             if (!res.ok) return;
-            const attachmentId = json.attachmentId || json.id;
-            const putUrl = json.putUrl || json.url;
-            const putHeaders = json.putHeaders || json.headers || {};
+
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+
+            if (!putUrl || !attachmentId) {
+                log('[user presign] invalid response, missing putUrl or attachmentId');
+                return;
+            }
+
+            log(`[user presign] got attachmentId=${attachmentId} putUrl=${putUrl}`);
+
             const ok = await uploadToPresigned(putUrl, putHeaders, f, contentType);
             if (!ok) return;
-            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
-                method: 'POST', credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
-                body: JSON.stringify({ attachmentId })
-            });
-            const completeJson = await completeRes.json().catch(()=>null);
-            log(`[complete] status=${completeRes.status} body=${JSON.stringify(completeJson)}`);
-            if (completeRes.ok) {
-                lastAvatarAttachmentId = attachmentId;
-                document.getElementById('avatarAttachmentId').textContent = String(attachmentId);
-                document.getElementById('btnBindAvatar').disabled = false;
-                try {
-                    const getRes = await fetch(`${BASE}/api/attachments/${attachmentId}/presigned-get?expiry=300`, {
-                        method: 'GET', credentials: 'include', headers: Object.assign({}, authHeaders())
-                    });
-                    const getJson = await getRes.json().catch(()=>null);
-                    const url = getJson && (getJson.url || Object.values(getJson)[0]);
-                    if (url) {
-                        const img = document.getElementById('avatarPreview');
-                        img.src = url; img.style.display = 'block';
+
+            log(`[user presign] upload successful. attachmentId=${attachmentId}`);
+
+            // finalize via attachments/complete
+            try {
+                const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                    body: JSON.stringify({ attachmentId })
+                });
+                const completeBody = await completeRes.json().catch(()=>null);
+                log(`[user complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
+                if (completeRes.ok) {
+                    lastAvatarAttachmentId = attachmentId;
+                    document.getElementById('avatarAttachmentId').textContent = String(attachmentId);
+                    document.getElementById('btnBindAvatar').disabled = false;
+
+                    // fetch presigned-get for preview
+                    try {
+                        const getRes = await fetch(`${BASE}/api/attachments/${attachmentId}/presigned-get?expiry=300`, {
+                            method: 'GET',
+                            credentials: 'include',
+                            headers: Object.assign({}, authHeaders())
+                        });
+                        const getBody = await getRes.json().catch(()=>null);
+                        const url = getBody && (getBody.url || getBody.data || getBody.putUrl) ? (getBody.url || getBody.data || getBody.putUrl) : (getBody && Object.values(getBody)[0]);
+                        if (url) {
+                            const img = document.getElementById('avatarPreview');
+                            img.src = url;
+                            img.style.display = 'block';
+                        }
+                    } catch (e) {
+                        log('[user presign] presigned-get failed: ' + e.message);
                     }
-                } catch(e){ log('[user presign] presigned-get failed: ' + e.message); }
+                } else {
+                    log('[user complete] finalize failed');
+                }
+            } catch (e) {
+                log('[user complete] error: ' + e.message);
             }
-        } catch(e){ log('[user presign] error: '+e.message); }
+
+        } catch (e) {
+            log('[user presign/upload] error: ' + e.message);
+        }
     });
 
+    // Bind avatar to user
     document.getElementById('btnBindAvatar').addEventListener('click', async () => {
-        if (!lastAvatarAttachmentId) { alert('先上传头像'); return; }
+        if (!lastAvatarAttachmentId) {
+            alert('请先上传头像并完成 finalize');
+            return;
+        }
         try {
+            // Call user avatar binding endpoint - send JSON { attachmentId }
             const res = await fetch(`${BASE}/api/user/userAvatar`, {
-                method: 'POST', credentials: 'include',
-                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                method: 'POST',
+                credentials: 'include',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
                 body: JSON.stringify({ attachmentId: lastAvatarAttachmentId })
             });
-            const json = await res.json().catch(()=>null);
-            log(`[bindAvatar] status=${res.status} body=${JSON.stringify(json)}`);
+            const body = await res.json().catch(()=>null);
+            log(`[bindAvatar] status=${res.status} body=${JSON.stringify(body)}`);
             if (res.ok) {
-                const data = json.data || json;
-                if (data && data.avatarUrl) {
-                    document.getElementById('userAvatarSmall').src = data.avatarUrl;
+                alert('绑定头像成功');
+                // if server returned avatarUrl, update small avatar display
+                const payload = body && body.data ? body.data : body;
+                if (payload && payload.avatarUrl) {
+                    document.getElementById('userAvatarSmall').src = payload.avatarUrl;
                     document.getElementById('userAvatarSmall').style.display = 'block';
                 }
+            } else {
+                alert('绑定头像失败: ' + JSON.stringify(body));
             }
-        } catch(e){ log('[bindAvatar] error: ' + e.message); }
+        } catch (e) {
+            log('[bindAvatar] error: ' + e.message);
+        }
     });
 
-    // debug interval
-    setInterval(()=> {
-        log('[debug] accessToken=' + (currentAccessToken ? '***' + currentAccessToken.slice(-8) : 'null'));
+    // Save diary (/api/diary/save)
+    document.getElementById('btnSaveDiary').addEventListener('click', async () => {
+        const title = document.getElementById('diaryTitle').value;
+        const diaryId = document.getElementById('diaryId').value || null;
+        const diaryVersion = document.getElementById('diaryVersion').value || null;
+        let blocks;
+        try { blocks = JSON.parse(document.getElementById('blocksJson').value); } catch(e){ alert('blocksJson 非法'); return; }
+        const diary = {};
+        if (diaryId) diary.id = Number(diaryId);
+        if (diaryVersion) diary.version = Number(diaryVersion);
+        diary.title = title;
+        const payload = { diary, blocks };
+        try {
+            const res = await fetch(`${BASE}/api/diary/save`, {
+                method: 'POST',
+                headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+                credentials: 'include',
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json().catch(()=>null);
+            log(`[saveDiary] status=${res.status} body=${JSON.stringify(data)}`);
+            if (res.ok) {
+                const result = data && data.data ? data.data : data;
+                if (result && result.diary) {
+                    document.getElementById('diaryId').value = result.diary.id || '';
+                    document.getElementById('diaryVersion').value = result.diary.version || '';
+                }
+                if (result && result.blocks) {
+                    document.getElementById('blocksJson').value = JSON.stringify(result.blocks, null, 2);
+                }
+            } else if (res.status === 409) alert('版本冲突');
+        } catch (e) { log('[saveDiary] error: ' + e.message); }
+    });
+
+    // Render diary & blocks into page
+    function renderDiary(result) {
+        const infoEl = document.getElementById('diaryInfo');
+        const blocksContainer = document.getElementById('blocksContainer');
+        infoEl.innerHTML = '';
+        blocksContainer.innerHTML = '';
+
+        if (!result || !result.diary) {
+            infoEl.textContent = '未查到日记';
+            return;
+        }
+
+        const d = result.diary;
+        infoEl.innerHTML = `<strong>Diary #${d.id}</strong> &nbsp; <span class="placeholder">title:</span> ${escapeHtml(d.title || '')}
+            <div class="placeholder">createdAt: ${d.createdAt || ''} &nbsp; updatedAt: ${d.updatedAt || ''} &nbsp; version: ${d.version || ''}</div>`;
+
+        const blocks = result.blocks || [];
+        if (blocks.length === 0) {
+            blocksContainer.innerHTML = '<div class="placeholder">没有 blocks</div>';
+            return;
+        }
+
+        for (const b of blocks) {
+            const blockEl = document.createElement('div');
+            blockEl.className = 'block';
+            const imgWrapper = document.createElement('div');
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'meta';
+
+            // Image case
+            if (b.type && b.type.toLowerCase() === 'image' && b.attachmentUrl) {
+                const img = document.createElement('img');
+                img.src = b.attachmentUrl;
+                img.alt = b.metadata || ('image-' + (b.id || ''));
+                img.onerror = () => { img.style.opacity = 0.6; img.title = '图片加载失败'; };
+                imgWrapper.appendChild(img);
+            } else if (b.type && b.type.toLowerCase() === 'image') {
+                imgWrapper.innerHTML = '<div class="placeholder">（图片，无可用 url）</div>';
+            } else {
+                imgWrapper.innerHTML = '<div class="placeholder">非图片</div>';
+            }
+
+            // meta
+            const contentHtml = b.content ? `<div><strong>内容:</strong> ${escapeHtml(b.content)}</div>` : '';
+            const attachmentHtml = b.attachmentId ? `<div><strong>attachmentId:</strong> ${b.attachmentId}</div>` : '';
+            const posHtml = b.position != null ? `<div><strong>position:</strong> ${b.position}</div>` : '';
+            const metaJson = b.metadata ? `<div><strong>metadata:</strong> ${escapeHtml(b.metadata)}</div>` : '';
+            metaDiv.innerHTML = `<div><strong>类型:</strong> ${escapeHtml(b.type || '')}</div>` +
+                contentHtml + attachmentHtml + posHtml + metaJson;
+
+            blockEl.appendChild(imgWrapper);
+            blockEl.appendChild(metaDiv);
+            blocksContainer.appendChild(blockEl);
+        }
+    }
+
+    function escapeHtml(s) {
+        if (!s && s !== 0) return '';
+        return String(s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    // Get diary and render (calls /api/diary/id/{id})
+    document.getElementById('btnGetDiary').addEventListener('click', async () => {
+        const id = document.getElementById('qryDiaryId').value;
+        if (!id) { alert('请输入 diary id'); return; }
+        try {
+            const res = await fetch(`${BASE}/api/diary/id/${id}`, {
+                method: 'GET',
+                headers: Object.assign({}, authHeaders()),
+                credentials: 'include'
+            });
+            const data = await res.json().catch(()=>null);
+            log(`[getDiary] status=${res.status} body=${JSON.stringify(data)}`);
+            if (res.status === 200 && data) {
+                const result = data.data ? data.data : data;
+                renderDiary(result);
+            } else {
+                document.getElementById('diaryInfo').textContent = `请求失败：status=${res.status}`;
+                document.getElementById('blocksContainer').innerHTML = '';
+            }
+        } catch (e) {
+            log('[getDiary] error: ' + e.message);
+        }
+    });
+
+    // show current access token debug
+    setInterval(() => {
+        log('[debug] currentAccessToken=' + (currentAccessToken ? ('***' + currentAccessToken.slice(-8)) : 'null'));
     }, 60000);
 </script>
 </body>

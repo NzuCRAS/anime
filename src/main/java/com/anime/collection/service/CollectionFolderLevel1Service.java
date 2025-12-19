@@ -16,16 +16,16 @@ public class CollectionFolderLevel1Service {
         this.collectionFolderLevel1Mapper = collectionFolderLevel1Mapper;
     }
 
-    //判断有无同名收藏夹
-    public List<CollectionFolderLevel1> getCollectionFolderLevel1ByName(String name,Long userId) {
-        return collectionFolderLevel1Mapper.getCollectionFolderLevel1ByName(name,userId);
+    //判断有无默认收藏夹
+    public List<CollectionFolderLevel1> getCollectionFolderLevel1ByName(Long userId) {
+        return collectionFolderLevel1Mapper.getCollectionFolderLevel1ByName(userId);
     }
-    //新建新的收藏夹（给我收藏夹名字，收藏夹封面id，用户id）
-    public boolean createNewFolder(String name,Long attachmentId,Long user_id) {
-        if(user_id == null && attachmentId == null){
+    //新建新的收藏夹（给我用户id）
+    public boolean createNewFolder(Long user_id) {
+        if(user_id == null){
             return false;
         }
-        return collectionFolderLevel1Mapper.createCollectionFolderLevel1(name,attachmentId,user_id);
+        return collectionFolderLevel1Mapper.createCollectionFolderLevel1(user_id);
     }
 
     //查询所有收藏夹（给我用户id）

@@ -13,13 +13,13 @@ import java.util.List;
 @Mapper
 public interface CollectionFolderLevel2Mapper extends BaseMapper<User> {
 
-    //首先判断有没有同名收藏夹
-    @Select("SELECT * From collection_folders_level2 WHERE name = #{name} AND user_id = #{fatherId}")
-    List<CollectionFolderLevel2> getCollectionFolderLevel2ByName(@Param("name") String name, @Param("fatherId")  Long fatherId);
+    //首先判断有没有默认收藏夹
+    @Select("SELECT * From collection_folders_level2 WHERE name = '默认收藏夹' AND user_id = #{fatherId}")
+    List<CollectionFolderLevel2> getCollectionFolderLevel2ByName(@Param("fatherId")  Long fatherId);
 
-    //插入收藏夹，给我父文件夹id
-    @Insert("INSERT INTO collection_folders_level2 VALUES  (#{name},#{father_id})")
-    boolean createCollectionFolderLevel2(@Param("name") String name, @Param("father_id") Long father_id);
+    //插入默认收藏夹，给我父文件夹id
+    @Insert("INSERT INTO collection_folders_level2 VALUES  ('默认收藏夹',#{father_id})")
+    boolean createCollectionFolderLevel2(@Param("father_id") Long father_id);
 
     //查询所有二级文件夹，给我父文件夹id
     @Select("SELECT * FROM collection_folders_level2 WHERE id = #{father_id}")

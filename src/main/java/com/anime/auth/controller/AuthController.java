@@ -39,6 +39,7 @@ public class AuthController {
                                                                HttpServletResponse response,
                                                                @RequestHeader(value = "Origin", required = false) String origin,
                                                                @RequestHeader(value = "X-Requested-With", required = false) String xRequestedWith) {
+        // 原实现不变
         String[] configured = env.getProperty("cors.allowed-origins", String[].class);
         Set<String> allowed = new HashSet<>();
         if (configured != null) {

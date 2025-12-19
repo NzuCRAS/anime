@@ -204,6 +204,7 @@ public class UserController {
     public ResponseEntity<Result<String>> logout(
             @CookieValue(value = "refreshToken", required = false) String refreshToken,
             @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+            @CurrentUser Long currentUserId,
             HttpServletResponse response) {
 
         // 1) 如果有 refresh cookie，撤销对应 refresh token（通过 RefreshTokenService）

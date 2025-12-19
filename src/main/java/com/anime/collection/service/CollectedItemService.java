@@ -29,9 +29,28 @@ public class CollectedItemService {
     }
 
     /**
+     * 创建收藏项（使用默认封面和名称，仅描述可自定义）
+     */
+    public boolean createWithDefault(String description, Long folderLevel2Id) {
+        // 默认值
+        Long defaultAttachmentId = 1L; // 可配置化，此处硬编码示例
+        String defaultName = "默认收藏项";
+
+        if (folderLevel2Id == null || folderLevel2Id <= 0) {
+            return false;
+        }
+        CollectedItem item = new CollectedItem();
+        item.setAttachmentId(defaultAttachmentId);
+        item.setName(defaultName);
+        item.setDescription(description != null ? description.trim() : "");
+        item.setFolderLevel2Id(folderLevel2Id);
+        return collectedItemMapper.insert(item) > 0;
+    }
+
+    /**
      * 更新收藏项的封面（attachmentId）
      */
-    public boolean updateAttachmentId(Long itemId, Long newAttachmentId) {
+    public boolean updateAttachmentId(Long itemId, Long newAttachmentId, Long userId) {
         if (itemId == null || itemId <= 0 || newAttachmentId == null || newAttachmentId <= 0) {
             return false;
         }
@@ -46,7 +65,7 @@ public class CollectedItemService {
     /**
      * 更新收藏项的名称
      */
-    public boolean updateName(Long itemId, String newName) {
+    public boolean updateName(Long itemId, String newName, Long userId) {
         if (itemId == null || itemId <= 0 || newName == null || newName.trim().isEmpty()) {
             return false;
         }
@@ -60,7 +79,7 @@ public class CollectedItemService {
     /**
      * 更新收藏项的描述
      */
-    public boolean updateDescription(Long itemId, String newDescription) {
+    public boolean updateDescription(Long itemId, String newDescription, Long userId) {
         if (itemId == null || itemId <= 0) {
             return false;
         }
