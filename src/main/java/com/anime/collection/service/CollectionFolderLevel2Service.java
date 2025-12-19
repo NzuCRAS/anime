@@ -16,22 +16,22 @@ public class CollectionFolderLevel2Service {
         this.collectionFolderLevel2Mapper = collectionFolderLevel2Mapper;
     }
 
-    //判断有无默认收藏夹
-    public List<CollectionFolderLevel2> getCollectionFolderLevel2ByName(Long  fatherId) {
-        return collectionFolderLevel2Mapper.getCollectionFolderLevel2ByName(fatherId);
+    //判断有无同名收藏夹
+    public List<CollectionFolderLevel2> getCollectionFolderLevel2ByName(String name, Long  fatherId) {
+        return collectionFolderLevel2Mapper.getCollectionFolderLevel2ByName(name, fatherId);
     }
 
     //新建新的收藏夹（给我父文件夹id）
-    public boolean createNewFolder(Long father_id) {
-        if (collectionFolderLevel2Mapper.getCollectionFolderLevel2ByName(father_id) == null){
+    public boolean createNewFolder(String name, Long father_id) {
+        if (collectionFolderLevel2Mapper.getCollectionFolderLevel2ByName(name, father_id) == null){
             return false;
         }
-        return collectionFolderLevel2Mapper.createCollectionFolderLevel2(father_id);
+        return collectionFolderLevel2Mapper.createCollectionFolderLevel2(name, father_id);
     }
 
     //查询所有收藏夹（给我父文件夹id）
     public List<CollectionFolderLevel2> getCollectionFolderLevel(Long father_id) {
-        if (collectionFolderLevel2Mapper.getCollectionFolderLevel2ByName(father_id) == null || father_id==null){
+        if (father_id==null){
             return new ArrayList<>();
         }
         return collectionFolderLevel2Mapper.findByFatherId(father_id);

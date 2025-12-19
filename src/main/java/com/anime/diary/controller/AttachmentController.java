@@ -1,8 +1,10 @@
 package com.anime.diary.controller;
 
+import com.anime.auth.web.CurrentUser;
 import com.anime.common.dto.attachment.PresignRequestDTO;
 import com.anime.common.dto.attachment.PresignResponseDTO;
 import com.anime.common.entity.attachment.Attachment;
+import com.anime.common.enums.ResultCode;
 import com.anime.common.service.AttachmentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,6 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Map;
 
@@ -25,6 +29,22 @@ import java.util.Map;
 public class AttachmentController {
 
     private final AttachmentService attachmentService;
+
+    @Operation(summary = "获取 presign（attachment测试）", description = "生成 presigned PUT URL，供前端上传 ")
+    @PostMapping("/presign")
+    public ResponseEntity<?> presign(@RequestBody PresignRequestDTO req, @CurrentUser Long userId) {
+        String storagePath = "/attachment/" + userId + "/"+ LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        log.info("presign request storagePath={} originalFilename={} mimeType={} uploadedBy={}",
+                storagePath, req.getOriginalFilename(), req.getMimeType(), userId);
+        try {
+            PresignResponseDTO resp = attachmentService.preCreateAndPresign(
+                    storagePath, req.getMimeType(), userId, req.getOriginalFilename(), null, null);
+            return ResponseEntity.ok(resp);
+        } catch (Exception ex) {
+            log.error("presign failed", ex);
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body("presign failed");
+        }
+    }
 
     @Operation(summary = "上传完成通知", description = "前端 PUT 到 presigned URL 后调用，后端将 attachment 标记为 available 并更新 metadata")
     @PostMapping("/complete")
