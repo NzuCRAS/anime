@@ -11,6 +11,7 @@ import com.anime.common.result.Result;
 import com.anime.common.service.AttachmentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -32,7 +33,7 @@ import java.util.List;
 public class CollectionFolderLevel1Controller {
 
     private final CollectionFolderLevel1Service collectionFolderLevel1Service;
-    AttachmentService attachmentService;
+    private final AttachmentService attachmentService;
 
     @Operation(summary = "获取 presign（Folder1 专用）", description = "生成 presigned PUT URL，供前端上传  相关附件")
     @PostMapping("/presign")
