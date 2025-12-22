@@ -38,10 +38,9 @@ public class CollectionFolderLevel1Service {
             return new ArrayList<>();
         }
         List<CollectionFolderLevel1> level1s = collectionFolderLevel1Mapper.findByUserId(user_id);
-        log.info(level1s.toString());
         List<Level1ResultDTO> results = new ArrayList<>();
-        Level1ResultDTO level1ResultDTO = new Level1ResultDTO();
         for (CollectionFolderLevel1 collectionFolderLevel1 : level1s) {
+            Level1ResultDTO level1ResultDTO = new Level1ResultDTO();
             level1ResultDTO.setId(collectionFolderLevel1.getId());
             level1ResultDTO.setName(collectionFolderLevel1.getName());
             level1ResultDTO.setURL(attachmentService.generatePresignedGetUrl(collectionFolderLevel1.getAttachmentId(),ATTACHMENT_URL_TTL_SECONDS));
