@@ -1,7 +1,9 @@
 package com.anime.collection.service;
 
+import com.anime.common.dto.collection.leve1.Level1ResultDTO;
 import com.anime.common.entity.collection.CollectionFolderLevel1;
 import com.anime.common.mapper.collection.CollectionFolderLevel1Mapper;
+import com.anime.common.service.AttachmentService;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -10,7 +12,9 @@ import java.util.List;
 @Service
 public class CollectionFolderLevel1Service {
 
-    CollectionFolderLevel1Mapper collectionFolderLevel1Mapper;
+    private CollectionFolderLevel1Mapper collectionFolderLevel1Mapper;
+    private static final long ATTACHMENT_URL_TTL_SECONDS = 600L;
+    private AttachmentService attachmentService;
 
     public CollectionFolderLevel1Service(CollectionFolderLevel1Mapper collectionFolderLevel1Mapper) {
         this.collectionFolderLevel1Mapper = collectionFolderLevel1Mapper;
@@ -29,11 +33,20 @@ public class CollectionFolderLevel1Service {
     }
 
     //查询所有收藏夹（给我用户id）
-    public List<CollectionFolderLevel1> getCollectionFolderLevel1(Long user_id) {
+    public List<Level1ResultDTO> getCollectionFolderLevel1(Long user_id) {
         if(user_id == null){
             return new ArrayList<>();
         }
-        return collectionFolderLevel1Mapper.findByUserId(user_id);
+        List<CollectionFolderLevel1> level1s = collectionFolderLevel1Mapper.findByUserId(user_id);
+        List<Level1ResultDTO> results = new ArrayList<>();
+        Level1ResultDTO level1ResultDTO = new Level1ResultDTO();
+        for (CollectionFolderLevel1 collectionFolderLevel1 : level1s) {
+            level1ResultDTO.setId(collectionFolderLevel1.getId());
+            level1ResultDTO.setName(collectionFolderLevel1.getName());
+            level1ResultDTO.setURL(attachmentService.generatePresignedGetUrl(collectionFolderLevel1.getAttachmentId(),ATTACHMENT_URL_TTL_SECONDS));
+            results.add(level1ResultDTO);
+        }
+        return results;
     }
 
     //更新收藏夹名（给我新名字，被修改的收藏夹id）

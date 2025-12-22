@@ -2,10 +2,7 @@ package com.anime.collection.controller;
 
 import com.anime.auth.web.CurrentUser;
 import com.anime.collection.service.CollectionFolderLevel2Service;
-import com.anime.common.dto.collection.level2.Level2DeleteDTO;
-import com.anime.common.dto.collection.level2.Level2GetDTO;
-import com.anime.common.dto.collection.level2.Level2UpdateNameDTO;
-import com.anime.common.dto.collection.level2.Level2CreateDTO;
+import com.anime.common.dto.collection.level2.*;
 import com.anime.common.entity.collection.CollectionFolderLevel2;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
@@ -54,7 +51,7 @@ public class CollectionFolderLevel2Controller {
 
     @Operation(summary = "获取父级下的二级收藏夹", description = "根据父级一级收藏夹 ID 获取其下的所有二级收藏夹")
     @GetMapping("/getFoldersByParent")
-    public ResponseEntity<Result<List<CollectionFolderLevel2>>> getFoldersByParent(@RequestBody Level2GetDTO dto,
+    public ResponseEntity<Result<List<Levev2ResultDTO>>> getFoldersByParent(@RequestBody Level2GetDTO dto,
                                                                                    @CurrentUser Long currentUserId) {
         try {
             if (currentUserId == null) {
@@ -63,7 +60,7 @@ public class CollectionFolderLevel2Controller {
             if (dto.getFather_id() == null || dto.getFather_id() <= 0) {
                 return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, null));
             }
-            List<CollectionFolderLevel2> folders = collectionFolderLevel2Service.getCollectionFolderLevel(dto.getFather_id());
+            List<Levev2ResultDTO> folders = collectionFolderLevel2Service.getCollectionFolderLevel(dto.getFather_id());
             if (folders == null) {
                 folders = new ArrayList<>();
             }

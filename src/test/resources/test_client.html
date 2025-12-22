@@ -384,45 +384,6 @@
 
             log(`[user presign] upload successful. attachmentId=${attachmentId}`);
 
-            // finalize via attachments/complete
-            try {
-                const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
-                    body: JSON.stringify({ attachmentId })
-                });
-                const completeBody = await completeRes.json().catch(()=>null);
-                log(`[user complete] status=${completeRes.status} body=${JSON.stringify(completeBody)}`);
-                if (completeRes.ok) {
-                    lastAvatarAttachmentId = attachmentId;
-                    document.getElementById('avatarAttachmentId').textContent = String(attachmentId);
-                    document.getElementById('btnBindAvatar').disabled = false;
-
-                    // fetch presigned-get for preview
-                    try {
-                        const getRes = await fetch(`${BASE}/api/attachments/${attachmentId}/presigned-get?expiry=300`, {
-                            method: 'GET',
-                            credentials: 'include',
-                            headers: Object.assign({}, authHeaders())
-                        });
-                        const getBody = await getRes.json().catch(()=>null);
-                        const url = getBody && (getBody.url || getBody.data || getBody.putUrl) ? (getBody.url || getBody.data || getBody.putUrl) : (getBody && Object.values(getBody)[0]);
-                        if (url) {
-                            const img = document.getElementById('avatarPreview');
-                            img.src = url;
-                            img.style.display = 'block';
-                        }
-                    } catch (e) {
-                        log('[user presign] presigned-get failed: ' + e.message);
-                    }
-                } else {
-                    log('[user complete] finalize failed');
-                }
-            } catch (e) {
-                log('[user complete] error: ' + e.message);
-            }
-
         } catch (e) {
             log('[user presign/upload] error: ' + e.message);
         }

@@ -1,13 +1,21 @@
 package com.anime.collection.service;
 
+import com.anime.common.dto.collection.items.ItemResultDTO;
 import com.anime.common.entity.collection.CollectedItem;
 import com.anime.common.mapper.collection.CollectedItemMapper;
+import com.anime.common.service.AttachmentService;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class CollectedItemService {
 
     private final CollectedItemMapper collectedItemMapper;
+    private AttachmentService attachmentService;
+    private static final long ATTACHMENT_URL_TTL_SECONDS = 600L;
 
     public CollectedItemService(CollectedItemMapper collectedItemMapper) {
         this.collectedItemMapper = collectedItemMapper;
@@ -55,6 +63,27 @@ public class CollectedItemService {
         item.setId(itemId);
         item.setName(newName.trim());
         return collectedItemMapper.updateById(item) > 0;
+    }
+
+    /**
+     * 获取收藏物
+     */
+    public List<ItemResultDTO> getItems(Long level2Id) {
+        if(level2Id == null){
+            return new ArrayList<>();
+        }
+        List<CollectedItem> items = collectedItemMapper.selectList(
+                new QueryWrapper<CollectedItem>().eq("level2_id", level2Id)
+        );
+        List<ItemResultDTO> results = new ArrayList<>();
+        ItemResultDTO itemResultDTO = new  ItemResultDTO();
+        for (CollectedItem collectionFolderLevel1 : items) {
+            itemResultDTO.setId(collectionFolderLevel1.getId());
+            itemResultDTO.setName(collectionFolderLevel1.getName());
+            itemResultDTO.setURL(attachmentService.generatePresignedGetUrl(collectionFolderLevel1.getAttachmentId(),ATTACHMENT_URL_TTL_SECONDS));
+            results.add(itemResultDTO);
+        }
+        return results;
     }
 
     /**

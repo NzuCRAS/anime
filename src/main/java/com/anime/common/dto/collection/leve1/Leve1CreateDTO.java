@@ -6,8 +6,6 @@ import lombok.Data;
 @Data
 
 public class Leve1CreateDTO {
-    @Schema(description = "用户Id", example = "42")
-    Long userId;
     @Schema(description = "引用的 attachment id（image 类型时使用）", example = "456")
     Long attachmentId;
     @Schema(description = "一级收藏夹名字", example = "默认收藏夹")
