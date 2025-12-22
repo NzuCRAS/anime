@@ -16,6 +16,9 @@ public class JwtProperties {
     // 签发者
     private String issuer = "anime";  // 默认值
 
+    // 开发模式开关：如果为 true，将在 SecurityConfig 中放行所有请求（仅用于本地开发）
+    private boolean devMode = false;
+
     // 访问令牌配置
     private AccessToken accessToken;
 

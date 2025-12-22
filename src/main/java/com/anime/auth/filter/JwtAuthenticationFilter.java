@@ -47,7 +47,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/webjars/**",
             "/public/**",
             "/static/**",
-            "/api/test/**",
             "/api/user/logout"
     );
 

@@ -44,6 +44,7 @@ jwt:
   refresh-token:
     expiration: 604800000   # 7 days in ms
     redis-key-prefix: "refresh:jti:"
+  dev-mode: false
 
 cors:
   allowed-origins:

@@ -1,5 +1,6 @@
 package com.anime.common.mapper.collection;
 
+import com.anime.common.dto.collection.leve1.Level1ResultDTO;
 import com.anime.common.entity.collection.CollectionFolderLevel1;
 import com.anime.common.entity.user.User;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -18,11 +19,11 @@ public interface CollectionFolderLevel1Mapper extends BaseMapper<User> {
     List<CollectionFolderLevel1> getCollectionFolderLevel1ByName(@Param("name") String name, @Param("userId") Long userId);
 
     //插入收藏夹，给我附件id，收藏夹名字,用户id
-    @Insert("INSERT INTO collection_folders_level1 VALUES  (#{name},#{attachment_id},NOW(),#{user_id})")
+    @Insert("INSERT INTO collection_folders_level1 VALUES  (NULL,#{name},#{attachment_id},NOW(),#{user_id})")
     boolean createCollectionFolderLevel1(@Param("name") String name,@Param("attachment_id") Long attachmentId, @Param("user_id") Long user_id);
 
     //查询所有一级文件夹，给我用户id
-    @Select("SELECT * FROM collection_folders_level1 WHERE id = #{user_id}")
+    @Select("SELECT * FROM collection_folders_level1 WHERE user_id = #{user_id}")
     List<CollectionFolderLevel1> findByUserId(@Param("user_id") Long user_id);
 
     //修改文件夹名字，给我新名字，被修改的一级文件夹id
