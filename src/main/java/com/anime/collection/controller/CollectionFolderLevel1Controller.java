@@ -58,9 +58,6 @@ public class CollectionFolderLevel1Controller {
             if (currentUserId == null) {
                 return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, "未授权"));
             }
-            if (dto.getUserId() == null || dto.getUserId() <= 0) {
-                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, "收藏夹ID无效"));
-            }
             if (dto.getAttachmentId() == null || dto.getAttachmentId() <= 0) {
                 return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, "附件ID无效"));
             }
@@ -81,12 +78,12 @@ public class CollectionFolderLevel1Controller {
 
     @Operation(summary = "获取用户一级收藏夹", description = "获取当前用户的所有一级收藏夹")
     @GetMapping("/getUserFolders")
-    public ResponseEntity<Result<List<CollectionFolderLevel1>>> getUserFolders(@CurrentUser Long currentUserId) {
+    public ResponseEntity<Result<List<Level1ResultDTO>>> getUserFolders(@CurrentUser Long currentUserId) {
         try {
             if (currentUserId == null) {
                 return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, null));
             }
-            List<CollectionFolderLevel1> folders = collectionFolderLevel1Service.getCollectionFolderLevel1(currentUserId);
+            List<Level1ResultDTO> folders = collectionFolderLevel1Service.getCollectionFolderLevel1(currentUserId);
             if (folders == null) folders = new ArrayList<>();
             return ResponseEntity.ok(Result.success(folders));
         } catch (Exception e) {

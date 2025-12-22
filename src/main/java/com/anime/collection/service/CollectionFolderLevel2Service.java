@@ -1,5 +1,6 @@
 package com.anime.collection.service;
 
+import com.anime.common.dto.collection.level2.Levev2ResultDTO;
 import com.anime.common.entity.collection.CollectionFolderLevel2;
 import com.anime.common.mapper.collection.CollectionFolderLevel2Mapper;
 import org.springframework.stereotype.Service;
@@ -30,11 +31,20 @@ public class CollectionFolderLevel2Service {
     }
 
     //查询所有收藏夹（给我父文件夹id）
-    public List<CollectionFolderLevel2> getCollectionFolderLevel(Long father_id) {
+    public List<Levev2ResultDTO> getCollectionFolderLevel(Long father_id) {
         if (father_id==null){
             return new ArrayList<>();
         }
-        return collectionFolderLevel2Mapper.findByFatherId(father_id);
+        List<CollectionFolderLevel2> level2 = collectionFolderLevel2Mapper.findByFatherId(father_id);
+        List<Levev2ResultDTO> results = new ArrayList<>();
+        Levev2ResultDTO levev2ResultDTO = new Levev2ResultDTO();
+        for (CollectionFolderLevel2 collectionFolderLevel2 : level2) {
+            levev2ResultDTO.setId(collectionFolderLevel2.getId());
+            levev2ResultDTO.setName(collectionFolderLevel2.getName());
+            levev2ResultDTO.setFather_id(collectionFolderLevel2.getParentFolderId());
+            results.add(levev2ResultDTO);
+        }
+        return  results;
     }
 
     //更新收藏夹名（给我新名字，被修改的收藏夹id）

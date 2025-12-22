@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 收藏项控制器
@@ -85,6 +87,27 @@ public class CollectedItemController {
                 return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, "用户ID无效"));
             }
             throw e;
+        }
+    }
+
+    @Operation(summary = "获取用户收藏", description = "获取当前用户的所有收藏")
+    @GetMapping("/getItems")
+    public ResponseEntity<Result<List<ItemResultDTO>>> getItems(@RequestBody ItemGetDTO dto,
+                                                                @CurrentUser Long currentUserId) {
+        try {
+            if (currentUserId == null) {
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, null));
+            }
+            if (dto.getFather_level2_id() == null || dto.getFather_level2_id() <= 0) {
+                return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, null));
+            }
+            List<ItemResultDTO> items = collectedItemService.getItems(dto.getFather_level2_id());
+            if (items  == null) {
+                items = new ArrayList<>();
+            }
+            return ResponseEntity.ok(Result.success(items));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR, null));
         }
     }
 
