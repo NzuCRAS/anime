@@ -77,17 +77,19 @@ public class CollectionFolderLevel1Controller {
     }
 
     @Operation(summary = "获取用户一级收藏夹", description = "获取当前用户的所有一级收藏夹")
-    @GetMapping("/getUserFolders")
+    @PostMapping("/getUserFolders")
     public ResponseEntity<Result<List<Level1ResultDTO>>> getUserFolders(@CurrentUser Long currentUserId) {
         try {
             if (currentUserId == null) {
-                return ResponseEntity.badRequest().body(Result.fail(ResultCode.UNAUTHORIZED, null));
+                return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode()).body(Result.fail(ResultCode.UNAUTHORIZED, null));
             }
             List<Level1ResultDTO> folders = collectionFolderLevel1Service.getCollectionFolderLevel1(currentUserId);
             if (folders == null) folders = new ArrayList<>();
             return ResponseEntity.ok(Result.success(folders));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Result.fail(ResultCode.SYSTEM_ERROR, null));
+            log.error("getUserFolders failed for userId=" + currentUserId, e); // << 加上日志
+            // 返回与 ResultCode 保持一致的 HTTP 状态（例如 SYSTEM_ERROR -> 500）
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, null));
         }
     }
 

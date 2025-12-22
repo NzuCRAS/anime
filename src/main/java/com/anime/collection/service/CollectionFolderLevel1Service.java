@@ -4,21 +4,21 @@ import com.anime.common.dto.collection.leve1.Level1ResultDTO;
 import com.anime.common.entity.collection.CollectionFolderLevel1;
 import com.anime.common.mapper.collection.CollectionFolderLevel1Mapper;
 import com.anime.common.service.AttachmentService;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
+@AllArgsConstructor
 public class CollectionFolderLevel1Service {
 
     private CollectionFolderLevel1Mapper collectionFolderLevel1Mapper;
     private static final long ATTACHMENT_URL_TTL_SECONDS = 600L;
     private AttachmentService attachmentService;
-
-    public CollectionFolderLevel1Service(CollectionFolderLevel1Mapper collectionFolderLevel1Mapper) {
-        this.collectionFolderLevel1Mapper = collectionFolderLevel1Mapper;
-    }
 
     //判断有无同名收藏夹
     public List<CollectionFolderLevel1> getCollectionFolderLevel1ByName(String name,Long userId) {
@@ -38,6 +38,7 @@ public class CollectionFolderLevel1Service {
             return new ArrayList<>();
         }
         List<CollectionFolderLevel1> level1s = collectionFolderLevel1Mapper.findByUserId(user_id);
+        log.info(level1s.toString());
         List<Level1ResultDTO> results = new ArrayList<>();
         Level1ResultDTO level1ResultDTO = new Level1ResultDTO();
         for (CollectionFolderLevel1 collectionFolderLevel1 : level1s) {

@@ -23,14 +23,37 @@ public class SecurityConfig {
 
     private final ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider;
     private final ObjectMapper objectMapper;
+    private final JwtProperties jwtProperties;
 
-    public SecurityConfig(ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider, ObjectMapper objectMapper) {
+    public SecurityConfig(ObjectProvider<JwtAuthenticationFilter> jwtFilterProvider,
+                          ObjectMapper objectMapper,
+                          JwtProperties jwtProperties) {
         this.jwtFilterProvider = jwtFilterProvider;
         this.objectMapper = objectMapper;
+        this.jwtProperties = jwtProperties;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        // 如果处于开发模式（devMode=true），放行所有请求（仅用于本地开发调试）
+        if (jwtProperties != null && jwtProperties.isDevMode()) {
+            // 注意：仍然保留 CORS/CSRF/异常处理的基本配置，但将所有请求 permitAll()
+            http
+                    .cors(Customizer.withDefaults())
+                    .csrf(AbstractHttpConfigurer::disable)
+                    .exceptionHandling(eh -> eh
+                            .authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
+                            .accessDeniedHandler(new RestAccessDeniedHandler(objectMapper))
+                    )
+                    .authorizeHttpRequests(auth -> auth
+                            .anyRequest().permitAll()
+                    )
+                    .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+            // 不注册 jwt 过滤器
+            return http.build();
+        }
+
+        // 非开发模式：原有安全配置
         http
                 .cors(Customizer.withDefaults())
                 .csrf(AbstractHttpConfigurer::disable)
@@ -59,7 +82,8 @@ public class SecurityConfig {
                                 "/swagger-ui.html",
                                 "/swagger-ui/**",
                                 "/swagger-ui-dist/**",
-                                "/swagger-resources/**"
+                                "/swagger-resources/**",
+                                "/api/test/whoami"
                         ).permitAll()
 
                         // 其它公开资源

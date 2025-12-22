@@ -358,6 +358,7 @@ public class AttachmentService {
      * @return
      */
     public String generatePresignedGetUrl(Long attachmentId, long expirySeconds) {
+        if (attachmentId == null) return null;
         Attachment a = attachmentMapper.selectById(attachmentId);
         if (a == null) throw new IllegalArgumentException("attachment not found: " + attachmentId);
 
