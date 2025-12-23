@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>测试客户端 - User & Collections (Level1/Level2 & Items)</title>
+    <style>
+        body{font-family:Arial,Helvetica,sans-serif;padding:16px;max-width:1100px;margin:auto;background:#f6f8fa}
+        h2{margin:0 0 12px}
+        .panel{background:#fff;border:1px solid #e6e9ee;padding:12px;border-radius:6px;margin-bottom:14px}
+        .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+        input,select,button,textarea{font-size:14px;padding:6px}
+        .log{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:8px;height:220px;overflow:auto;border-radius:4px}
+        label{display:inline-flex;align-items:center;gap:6px}
+        .small{font-size:13px;color:#666}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .full{grid-column:1/-1}
+        .cover-img { width:120px; height:80px; object-fit:cover; border:1px solid #ddd; border-radius:4px; display:inline-block; margin-right:8px; }
+        .list-item { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+    </style>
+</head>
+<body>
+<h2>测试：用户认证 & 收藏（一级/二级收藏夹 创建 & 查询；收藏项 创建 & 查询）</h2>
+
+<div class="panel" id="authPanel">
+    <h3>用户 (Auth)</h3>
+    <div class="flex">
+        <label>用户名/邮箱: <input id="username" value="test_name"></label>
+        <label>密码: <input id="password" type="password" value="test_password"></label>
+        <button id="btnLogin">登录 (/api/user/login)</button>
+        <button id="btnRefresh">刷新 token (/api/auth/refresh)</button>
+        <button id="btnWhoami">WhoAmI (/api/test/whoami)</button>
+    </div>
+    <div style="margin-top:10px">
+        <strong>用户信息 (显示后端返回)：</strong>
+        <pre id="userInfo" class="log">未登录</pre>
+    </div>
+</div>
+
+<div class="panel" id="collectionsPanel">
+    <h3>Collections 测试（Level1 / Level2 / Items）</h3>
+    <div class="grid">
+
+        <!-- Level1: presign upload & create -->
+        <div>
+            <h4>Level1 - 上传封面 & 创建一级收藏夹</h4>
+            <div class="flex">
+                <input type="file" id="level1File" accept="image/*">
+                <label>名称: <input id="level1Name" placeholder="收藏夹名称"></label>
+                <button id="btnLevel1Upload">上传封面 (presign -> PUT -> complete)</button>
+            </div>
+            <div style="margin-top:8px" class="flex">
+                <label>最近上传的 attachmentId: <input id="level1LastAttachmentId" readonly style="width:160px"></label>
+                <button id="btnCreateLevel1">创建 Level1 (/api/collection/folder/level1/createNewFolder)</button>
+            </div>
+        </div>
+
+        <!-- Level1: get user folders -->
+        <div>
+            <h4>Level1 - 查询当前用户的一级收藏夹</h4>
+            <div class="flex">
+                <button id="btnGetUserLevel1">获取 (/api/collection/folder/level1/getUserFolders)</button>
+            </div>
+            <div id="level1List" style="margin-top:8px" class="small">未查询</div>
+        </div>
+
+        <!-- Level2: create & get by parent -->
+        <div>
+            <h4>Level2 - 创建二级收藏夹</h4>
+            <div class="flex">
+                <label>父级一级收藏夹 ID: <input id="level2FatherId" style="width:120px" placeholder="father_id"></label>
+                <label>名称: <input id="level2Name" placeholder="二级名称"></label>
+                <button id="btnCreateLevel2">创建 (/api/collection/folder/level2/createDefaultFolder)</button>
+            </div>
+
+            <h4 style="margin-top:12px">Level2 - 查询父级下的二级收藏夹</h4>
+            <div class="flex">
+                <label>father_id: <input id="level2QueryFatherId" style="width:120px"></label>
+                <button id="btnGetLevel2ByParent">获取 (/api/collection/folder/level2/getFoldersByParent)</button>
+            </div>
+            <div id="level2List" style="margin-top:8px" class="small">未查询</div>
+        </div>
+
+        <!-- Items: presign upload & create -->
+        <div>
+            <h4>Items - 上传封面 & 创建收藏项</h4>
+            <div class="flex">
+                <input type="file" id="itemFile" accept="image/*">
+                <label>名称: <input id="itemName" placeholder="Item 名称"></label>
+            </div>
+            <div style="margin-top:8px" class="flex">
+                <label>描述: <input id="itemDesc" placeholder="描述"></label>
+                <label>所属二级ID: <input id="itemFatherLevel2Id" style="width:120px" placeholder="father_level2_id"></label>
+            </div>
+            <div style="margin-top:8px" class="flex">
+                <label>最近上传 attachmentId: <input id="itemLastAttachmentId" readonly style="width:160px"></label>
+                <button id="btnItemUpload">上传封面 (presign -> PUT -> complete) (/api/collection/item/presign)</button>
+                <button id="btnCreateItem">创建 Item (/api/collection/item/createCustom)</button>
+            </div>
+        </div>
+
+        <!-- Items: get by parent -->
+        <div>
+            <h4>Items - 查询 (按二级收藏夹)</h4>
+            <div class="flex">
+                <label>father_level2_id: <input id="itemQueryFather" style="width:120px"></label>
+                <button id="btnGetItems">获取 (/api/collection/item/getItems)</button>
+            </div>
+            <div id="itemList" style="margin-top:8px" class="small">未查询</div>
+        </div>
+
+    </div>
+</div>
+
+<div class="panel">
+    <h3>日志 / 响应</h3>
+    <pre id="log" class="log"></pre>
+</div>
+
+<script>
+    /* Minimal test client for user + collection flows.
+       Fix: when listing level1 / items, prefer to show cover image using URL fields returned by backend (coverAttachmentUrl, attachmentUrl, coverUrl, url).
+    */
+
+    const BASE = 'https://localhost:8443';
+    let currentAccessToken = null;
+    const $ = id => document.getElementById(id);
+    const log = (s) => { $('log').textContent = new Date().toISOString() + '  ' + s + '\n\n' + $('log').textContent; };
+
+    function authHeaders(){
+        const headers = {};
+        if (currentAccessToken) headers['Authorization'] = 'Bearer ' + currentAccessToken;
+        return headers;
+    }
+
+    async function uploadToPresigned(putUrl, putHeaders, fileOrBlob, contentType){
+        const headers = {};
+        for(const k in putHeaders) if(Object.prototype.hasOwnProperty.call(putHeaders,k)) headers[k]=putHeaders[k];
+        headers['Content-Type'] = contentType || (fileOrBlob.type || 'application/octet-stream');
+        const r = await fetch(putUrl, { method:'PUT', headers, body: fileOrBlob });
+        log(`[upload] PUT -> ${r.status}`);
+        if(!r.ok){ const t = await r.text().catch(()=>null); return { ok:false, text:t }; }
+        return { ok:true };
+    }
+
+    /* ---------- Auth handlers ---------- */
+    $('btnLogin').addEventListener('click', async () => {
+        try{
+            const res = await fetch(`${BASE}/api/user/login`, {
+                method:'POST', credentials:'include',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ usernameOrEmail: $('username').value, password: $('password').value })
+            });
+            const text = await res.text();
+            log(`[login] status=${res.status} body=${text}`);
+            const newAccess = res.headers.get('New-Access-Token');
+            if(newAccess){ currentAccessToken = newAccess; log('[login] New-Access-Token saved'); }
+            let json=null; try{ json=JSON.parse(text); }catch(e){}
+            const payload = json && json.data !== undefined ? json.data : json || text;
+            $('userInfo').textContent = JSON.stringify(payload, null, 2);
+        }catch(e){ log('[login] error: ' + e.message); }
+    });
+
+    $('btnRefresh').addEventListener('click', async () => {
+        try{
+            const res = await fetch(`${BASE}/api/auth/refresh`, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'}});
+            const json = await res.json().catch(()=>null);
+            log(`[refresh] status=${res.status} body=${JSON.stringify(json)}`);
+            const headerToken = res.headers.get('New-Access-Token');
+            if(headerToken){ currentAccessToken = headerToken; log('[refresh] New-Access-Token saved'); }
+            else if(json && json.data && json.data.accessToken) currentAccessToken = json.data.accessToken;
+        }catch(e){ log('[refresh] error: ' + e.message); }
+    });
+
+    $('btnWhoami').addEventListener('click', async () => {
+        try{
+            const res = await fetch(`${BASE}/api/test/whoami`, { method:'GET', credentials:'include', headers: Object.assign({}, authHeaders()) });
+            const text = await res.text().catch(()=>null);
+            log(`[whoami] status=${res.status} body=${text}`);
+        }catch(e){ log('[whoami] error: ' + e.message); }
+    });
+
+    /* ---------- Level1: presign upload & create ---------- */
+    $('btnLevel1Upload').addEventListener('click', async () => {
+        const f = $('level1File').files[0];
+        if(!f){ alert('请选择文件'); return; }
+        const contentType = f.type || 'application/octet-stream';
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level1/presign`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ originalFilename: f.name, mimeType: contentType })
+            });
+            const resp = await res.json().catch(()=>null);
+            log(`[level1 presign] status=${res.status} body=${JSON.stringify(resp)}`);
+            if(!res.ok){ alert('presign failed'); return; }
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+            if(!putUrl || !attachmentId){ alert('presign response invalid'); return; }
+            const up = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if(!up.ok){ alert('upload failed'); return; }
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId })
+            });
+            const comp = await completeRes.json().catch(()=>null);
+            log(`[level1 complete] status=${completeRes.status} body=${JSON.stringify(comp)}`);
+            if(completeRes.ok){ $('level1LastAttachmentId').value = attachmentId; alert('上传并完成'); }
+        }catch(e){ log('[level1 upload] ' + e.message); }
+    });
+
+    $('btnCreateLevel1').addEventListener('click', async () => {
+        const name = $('level1Name').value;
+        const attachmentId = Number($('level1LastAttachmentId').value) || null;
+        if(!name || !attachmentId){ alert('请填写名称并上传封面'); return; }
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level1/createNewFolder`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ name, attachmentId })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[create level1] status=${res.status} body=${JSON.stringify(body)}`);
+            alert('创建请求已发送，请查看日志');
+        }catch(e){ log('[create level1] ' + e.message); }
+    });
+
+    /* ---------- Level1: get user folders (show cover image, not attachmentId) ---------- */
+    function pickImageUrl(obj){
+        // prefer known keys that may contain the get-url returned by backend
+        return obj.coverAttachmentUrl || obj.coverUrl || obj.attachmentUrl || obj.url || obj.cover || null;
+    }
+
+    $('btnGetUserLevel1').addEventListener('click', async () => {
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level1/getUserFolders`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders())
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[get user level1] status=${res.status} body=${JSON.stringify(body)}`);
+            const payload = body && body.data ? body.data : body;
+            const cont = $('level1List'); cont.innerHTML = '';
+            if(!payload || payload.length === 0){ cont.textContent = '无一级收藏夹'; return; }
+            // render as list with cover image (if provided) and name
+            for(const f of payload){
+                const row = document.createElement('div'); row.className = 'list-item';
+                const imgUrl = pickImageUrl(f);
+                if(imgUrl){
+                    const img = document.createElement('img'); img.className='cover-img'; img.src = imgUrl;
+                    row.appendChild(img);
+                } else {
+                    // fallback small placeholder
+                    const placeholder = document.createElement('div'); placeholder.className='cover-img'; placeholder.style.display='flex'; placeholder.style.alignItems='center'; placeholder.style.justifyContent='center'; placeholder.style.color='#999'; placeholder.textContent = '无图';
+                    row.appendChild(placeholder);
+                }
+                const meta = document.createElement('div');
+                meta.innerHTML = `<div><strong>${escapeHtml(String(f.name || f.title || '无名'))}</strong> (id=${f.id || ''})</div>
+                        <div class="small">attachmentId: ${f.attachmentId || f.coverAttachmentId || ''}</div>`;
+                row.appendChild(meta);
+                cont.appendChild(row);
+            }
+        }catch(e){ log('[get user level1] ' + e.message); }
+    });
+
+    /* ---------- Level2: create & get by parent ---------- */
+    $('btnCreateLevel2').addEventListener('click', async () => {
+        const father_id = Number($('level2FatherId').value) || null;
+        const name = $('level2Name').value;
+        if(!father_id || !name){ alert('请填写 father_id 与 name'); return; }
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level2/createDefaultFolder`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ father_id, name })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[create level2] status=${res.status} body=${JSON.stringify(body)}`);
+            alert('创建请求已发送');
+        }catch(e){ log('[create level2] ' + e.message); }
+    });
+
+    $('btnGetLevel2ByParent').addEventListener('click', async () => {
+        const father_id = Number($('level2QueryFatherId').value) || null;
+        if(!father_id){ alert('请填写 father_id'); return; }
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level2/getFoldersByParent`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ father_id })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[get level2] status=${res.status} body=${JSON.stringify(body)}`);
+            const payload = body && body.data ? body.data : body;
+            const cont = $('level2List'); cont.innerHTML = '';
+            if(!payload || payload.length === 0){ cont.textContent = '无二级收藏夹'; return; }
+            const ul = document.createElement('ul');
+            for(const f of payload){ const li = document.createElement('li'); li.textContent = `id=${f.id} name=${f.name} father_id=${f.fatherId || f.father_id || ''}`; ul.appendChild(li); }
+            cont.appendChild(ul);
+        }catch(e){ log('[get level2] ' + e.message); }
+    });
+
+    /* ---------- Items: presign upload & create ---------- */
+    $('btnItemUpload').addEventListener('click', async () => {
+        const f = $('itemFile').files[0];
+        if(!f){ alert('请选择文件'); return; }
+        const contentType = f.type || 'application/octet-stream';
+        try{
+            const res = await fetch(`${BASE}/api/collection/item/presign`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ originalFilename: f.name, mimeType: contentType })
+            });
+            const resp = await res.json().catch(()=>null);
+            log(`[item presign] status=${res.status} body=${JSON.stringify(resp)}`);
+            if(!res.ok){ alert('presign failed'); return; }
+            const attachmentId = resp.attachmentId || resp.id;
+            const putUrl = resp.putUrl || resp.url;
+            const putHeaders = resp.putHeaders || resp.headers || {};
+            if(!putUrl || !attachmentId){ alert('presign invalid'); return; }
+            const up = await uploadToPresigned(putUrl, putHeaders, f, contentType);
+            if(!up.ok){ alert('upload failed'); return; }
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method:'POST', credentials:'include', headers: Object.assign({'Content-Type':'application/json'}, authHeaders()), body: JSON.stringify({ attachmentId })
+            });
+            const comp = await completeRes.json().catch(()=>null);
+            log(`[item complete] status=${completeRes.status} body=${JSON.stringify(comp)}`);
+            if(completeRes.ok){ $('itemLastAttachmentId').value = attachmentId; alert('上传完成'); }
+        }catch(e){ log('[item upload] ' + e.message); }
+    });
+
+    $('btnCreateItem').addEventListener('click', async () => {
+        const name = $('itemName').value;
+        const description = $('itemDesc').value;
+        const attachment_id = Number($('itemLastAttachmentId').value) || null;
+        const father_level2_id = Number($('itemFatherLevel2Id').value) || null;
+        if(!name || !father_level2_id || !attachment_id){ alert('请填写 name, father_level2_id 和 attachment_id'); return; }
+        try{
+            const res = await fetch(`${BASE}/api/collection/item/createCustom`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ name, description, attachment_id, father_level2_id })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[create item] status=${res.status} body=${JSON.stringify(body)}`);
+            alert('创建请求已发送');
+        }catch(e){ log('[create item] ' + e.message); }
+    });
+
+    /* ---------- Items: getItems by father_level2_id (show cover image if backend provides URL) ---------- */
+    $('btnGetItems').addEventListener('click', async () => {
+        const father_level2_id = Number($('itemQueryFather').value) || null;
+        if(!father_level2_id){ alert('请填写 father_level2_id'); return; }
+        try{
+            const res = await fetch(`${BASE}/api/collection/item/getItems`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ father_level2_id })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[get items] status=${res.status} body=${JSON.stringify(body)}`);
+            const payload = body && body.data ? body.data : body;
+            const cont = $('itemList'); cont.innerHTML = '';
+            if(!payload || payload.length === 0){ cont.textContent = '无收藏项'; return; }
+            for(const it of payload){
+                const row = document.createElement('div'); row.className='list-item';
+                const imgUrl = pickImageUrl(it) || pickImageUrl({ attachmentUrl: it.coverAttachmentUrl, url: it.coverUrl });
+                if(imgUrl){
+                    const img = document.createElement('img'); img.className='cover-img'; img.src = imgUrl;
+                    row.appendChild(img);
+                } else {
+                    const placeholder = document.createElement('div'); placeholder.className='cover-img'; placeholder.style.display='flex'; placeholder.style.alignItems='center'; placeholder.style.justifyContent='center'; placeholder.style.color='#999'; placeholder.textContent = '无图';
+                    row.appendChild(placeholder);
+                }
+                const meta = document.createElement('div');
+                meta.innerHTML = `<div><strong>${escapeHtml(String(it.name || it.title || '无名'))}</strong> (id=${it.id || ''})</div>
+                        <div class="small">attachmentId: ${it.attachmentId || it.coverAttachmentId || ''}</div>`;
+                row.appendChild(meta);
+                cont.appendChild(row);
+            }
+        }catch(e){ log('[get items] ' + e.message); }
+    });
+
+    /* ---------- Helpers ---------- */
+    function pickImageUrl(obj){
+        if(!obj) return null;
+        return obj.coverAttachmentUrl || obj.coverUrl || obj.attachmentUrl || obj.url || obj.cover || null;
+    }
+    function escapeHtml(s){
+        if(!s && s !== 0) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+</script>
+</body>
+</html>

@@ -91,7 +91,7 @@ public class CollectedItemController {
     }
 
     @Operation(summary = "获取用户收藏", description = "获取当前用户的所有收藏")
-    @GetMapping("/getItems")
+    @PostMapping("/getItems")
     public ResponseEntity<Result<List<ItemResultDTO>>> getItems(@RequestBody ItemGetDTO dto,
                                                                 @CurrentUser Long currentUserId) {
         try {
