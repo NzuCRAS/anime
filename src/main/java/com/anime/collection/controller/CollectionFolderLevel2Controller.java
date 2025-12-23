@@ -50,7 +50,7 @@ public class CollectionFolderLevel2Controller {
     }
 
     @Operation(summary = "获取父级下的二级收藏夹", description = "根据父级一级收藏夹 ID 获取其下的所有二级收藏夹")
-    @GetMapping("/getFoldersByParent")
+    @PostMapping("/getFoldersByParent")
     public ResponseEntity<Result<List<Levev2ResultDTO>>> getFoldersByParent(@RequestBody Level2GetDTO dto,
                                                                                    @CurrentUser Long currentUserId) {
         try {

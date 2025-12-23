@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>测试客户端 - Auth & Diary</title>
+    <style>
+        body{font-family:Arial,Helvetica,sans-serif;padding:18px;max-width:1000px;margin:auto;background:#f6f8fa}
+        h2{margin:0 0 12px}
+        .panel{background:#fff;border:1px solid #e6e9ee;padding:12px;border-radius:6px;margin-bottom:12px}
+        input,button{font-size:14px;padding:6px}
+        .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+        .diary-editor{min-height:180px;border:1px dashed #ccc;padding:10px;border-radius:4px;background:#fff;overflow:auto}
+        .log{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:8px;height:160px;overflow:auto;border-radius:4px}
+        .small{font-size:13px;color:#666}
+        .preview img{max-width:100%;height:auto;display:block;margin:8px 0}
+    </style>
+</head>
+<body>
+<h2>轻量测试：登录 & 日记（含图片）</h2>
+
+<div class="panel" id="authPanel">
+    <h3>登录</h3>
+    <div class="flex">
+        <label>用户名/邮箱: <input id="username" value="test_name"></label>
+        <label>密码: <input id="password" type="password" value="test_password"></label>
+        <button id="btnLogin">登录 (/api/user/login)</button>
+        <button id="btnRefresh">刷新 token (/api/auth/refresh)</button>
+        <button id="btnWhoami">WhoAmI (/api/test/whoami)</button>
+    </div>
+    <div style="margin-top:10px">
+        <strong>用户信息：</strong>
+        <pre id="userInfo" class="log">未登录</pre>
+    </div>
+</div>
+
+<div class="panel" id="diaryPanel">
+    <h3>日记编辑 & 保存</h3>
+    <div style="margin-bottom:8px" class="flex">
+        <label>标题: <input id="diaryTitle" style="width:50%"></label>
+        <label>Diary ID: <input id="diaryId" style="width:120px" placeholder="留空新建"></label>
+        <label>Version: <input id="diaryVersion" style="width:120px" placeholder="可选"></label>
+    </div>
+
+    <div class="toolbar flex" style="margin-bottom:8px">
+        <input type="file" id="diaryImageFile" accept="image/*">
+        <button id="btnInsertImage">插入图片（presign->上传->complete）</button>
+        <button id="btnSaveDiary">保存日记 (/api/diary/save)</button>
+        <button id="btnLoadDiary">加载 Diary (/api/diary/id/{id})</button>
+    </div>
+
+    <div id="diaryEditor" class="diary-editor" contenteditable="true" placeholder="在此输入：可换行、粘贴图片或使用插入按钮"></div>
+
+    <div style="margin-top:10px" class="small">提示：插入的图片会在插入时上传并获得 attachmentId；保存时前端会把 attachmentId 一并提交（BlockDTO 字段）。</div>
+
+    <div style="margin-top:12px">
+        <strong>预览：</strong>
+        <div id="diaryPreview" class="preview"></div>
+    </div>
+</div>
+
+<div class="panel">
+    <h3>调试日志</h3>
+    <pre id="log" class="log"></pre>
+</div>
+
+<script>
+    /*
+      精简版：只包含登录/refresh/whoami 与日记相关逻辑（插图上传即得到 attachmentId，保存只传 BlockDTO 字段）
+      要点：
+      - presign: POST /api/diary/presign { originalFilename, mimeType } -> 返回 putUrl + attachmentId (resp.putUrl, resp.attachmentId)
+      - upload: PUT to putUrl with Content-Type (use returned putHeaders if any)
+      - finalize: POST /api/attachments/complete { attachmentId }
+      - save diary: POST /api/diary/save { diary, blocks } where each block is { blockId, type, content, attachmentId, metadata, position }
+    */
+
+    const BASE = 'https://localhost:8443';
+    let currentAccessToken = null;
+
+    const el = id => document.getElementById(id);
+    const log = (s)=> { el('log').textContent = new Date().toISOString() + '  ' + s + '\n\n' + el('log').textContent; }
+
+    // auth header helper
+    function authHeaders(){
+        const headers = {};
+        if (currentAccessToken) headers['Authorization'] = 'Bearer ' + currentAccessToken;
+        return headers;
+    }
+
+    /* ---------- Auth handlers ---------- */
+    el('btnLogin').addEventListener('click', async ()=>{
+        try{
+            const res = await fetch(`${BASE}/api/user/login`, {
+                method:'POST', credentials:'include',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ usernameOrEmail: el('username').value, password: el('password').value })
+            });
+            const text = await res.text();
+            log(`[login] status=${res.status} body=${text}`);
+            const newAccess = res.headers.get('New-Access-Token');
+            if (newAccess){ currentAccessToken = newAccess; log('[login] New-Access-Token saved'); }
+            let json=null; try{ json=JSON.parse(text); }catch(e){}
+            const payload = json && json.data!==undefined ? json.data : json || text;
+            el('userInfo').textContent = JSON.stringify(payload, null, 2);
+        }catch(e){ log('[login] error: ' + e.message); }
+    });
+
+    el('btnRefresh').addEventListener('click', async ()=>{
+        try{
+            const res = await fetch(`${BASE}/api/auth/refresh`, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'}});
+            const json = await res.json().catch(()=>null);
+            log(`[refresh] status=${res.status} body=${JSON.stringify(json)}`);
+            const headerToken = res.headers.get('New-Access-Token');
+            if (headerToken){ currentAccessToken = headerToken; log('[refresh] New-Access-Token saved'); }
+            else if (json && json.data && json.data.accessToken){ currentAccessToken = json.data.accessToken; }
+        }catch(e){ log('[refresh] error: ' + e.message); }
+    });
+
+    el('btnWhoami').addEventListener('click', async ()=>{
+        try{
+            const res = await fetch(`${BASE}/api/test/whoami`, { method:'GET', credentials:'include', headers: Object.assign({}, authHeaders()) });
+            const text = await res.text().catch(()=>null);
+            log(`[whoami] status=${res.status} body=${text}`);
+        }catch(e){ log('[whoami] error: ' + e.message); }
+    });
+
+    /* ---------- Upload helpers (presign -> PUT -> complete) ---------- */
+    async function uploadToPresigned(putUrl, putHeaders, blob, contentType){
+        const headers = {};
+        for(const k in putHeaders) if(Object.prototype.hasOwnProperty.call(putHeaders,k)) headers[k]=putHeaders[k];
+        headers['Content-Type'] = contentType || (blob.type || 'application/octet-stream');
+        const r = await fetch(putUrl, { method:'PUT', headers, body: blob });
+        log(`[upload] PUT status=${r.status}`);
+        if(!r.ok){ const t = await r.text().catch(()=>null); return {ok:false, text:t}; }
+        return {ok:true};
+    }
+
+    /* ---------- Diary image insertion flow ---------- */
+    el('btnInsertImage').addEventListener('click', async ()=>{
+        const f = el('diaryImageFile').files[0];
+        if(!f){ alert('请选择图片文件'); return; }
+        await presignUploadAndInsertImage(f);
+        el('diaryImageFile').value = '';
+    });
+
+    async function presignUploadAndInsertImage(blob){
+        try{
+            const contentType = blob.type || 'application/octet-stream';
+            const presignReq = { originalFilename: 'pasted-image', mimeType: contentType };
+            const presignRes = await fetch(`${BASE}/api/diary/presign`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify(presignReq)
+            });
+            const presignJson = await presignRes.json().catch(()=>null);
+            log(`[diary presign] status=${presignRes.status} body=${JSON.stringify(presignJson)}`);
+            if(!presignRes.ok){ alert('presign 失败'); return; }
+            const attachmentId = presignJson.attachmentId || presignJson.id;
+            const putUrl = presignJson.putUrl || presignJson.url;
+            const putHeaders = presignJson.putHeaders || presignJson.headers || {};
+
+            if(!putUrl || !attachmentId){ alert('presign 返回不完整'); return; }
+
+            const up = await uploadToPresigned(putUrl, putHeaders, blob, contentType);
+            if(!up.ok){ alert('上传失败: ' + (up.text||'')); return; }
+
+            const completeRes = await fetch(`${BASE}/api/attachments/complete`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ attachmentId })
+            });
+            const completeJson = await completeRes.json().catch(()=>null);
+            log(`[complete] status=${completeRes.status} body=${JSON.stringify(completeJson)}`);
+            if(!completeRes.ok){ alert('complete 失败'); return; }
+
+            // insert as block-level wrapper so parser recognizes it
+            const tempUrl = URL.createObjectURL(blob);
+            const img = document.createElement('img');
+            img.src = tempUrl;
+            img.style.maxWidth = '60%';
+            img.dataset.attachmentId = String(attachmentId);
+            img.dataset.previewUrl = tempUrl;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'diary-image-block';
+            wrapper.appendChild(img);
+
+            insertNodeAtCaret(wrapper);
+
+            // ensure an empty block after image for usability
+            const br = document.createElement('div'); br.innerHTML = '<br>';
+            wrapper.parentNode.insertBefore(br, wrapper.nextSibling);
+
+            log(`Inserted image block with attachmentId=${attachmentId}`);
+        }catch(e){
+            log('[presignUploadAndInsertImage] ' + e.message);
+            alert('插入图片失败: ' + e.message);
+        }
+    }
+
+    function insertNodeAtCaret(node){
+        const sel = window.getSelection();
+        if(!sel || !sel.rangeCount){ el('diaryEditor').appendChild(node); el('diaryEditor').appendChild(document.createElement('div')); return; }
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(node);
+        range.setStartAfter(node); range.setEndAfter(node);
+        sel.removeAllRanges(); sel.addRange(range);
+    }
+
+    /* ---------- Robust parse: walk DOM and build blocks (position 1-based) ---------- */
+    function parseEditorToBlocks(){
+        const blocks = [];
+        let pos = 1;
+        let accText = '';
+
+        function flushText(){
+            if(accText && accText.trim()){
+                blocks.push({ blockId:null, type:'text', content: accText.trim(), attachmentId: null, metadata: null, position: pos++ });
+                accText = '';
+            }
+        }
+
+        function walk(node){
+            if(!node) return;
+            if(node.nodeType === Node.TEXT_NODE){
+                accText += node.textContent || '';
+                return;
+            }
+            if(node.nodeType !== Node.ELEMENT_NODE) return;
+
+            const tag = node.tagName.toLowerCase();
+            if(tag === 'img'){
+                flushText();
+                const aid = node.dataset && node.dataset.attachmentId ? Number(node.dataset.attachmentId) : null;
+                blocks.push({ blockId:null, type:'image', content:null, attachmentId: aid, metadata: null, position: pos++ });
+                return;
+            }
+
+            // treat block-level elements specially
+            const blockTags = ['div','p','section','article','figure','li','blockquote'];
+            if(blockTags.includes(tag)){
+                const children = Array.from(node.childNodes);
+                for(const c of children) walk(c);
+                flushText();
+                return;
+            }
+
+            // inline element: recurse children
+            const children = Array.from(node.childNodes);
+            for(const c of children) walk(c);
+        }
+
+        const top = Array.from(el('diaryEditor').childNodes);
+        for(const n of top) walk(n);
+        flushText();
+        return blocks;
+    }
+
+    /* ---------- Save diary: validate image blocks have attachmentId and send BlockDTO-shaped payload ---------- */
+    el('btnSaveDiary').addEventListener('click', async ()=>{
+        try{
+            el('btnSaveDiary').disabled = true;
+            const title = el('diaryTitle').value || '';
+            const diaryIdVal = el('diaryId').value || null;
+            const diaryVersion = el('diaryVersion').value || null;
+
+            const parsed = parseEditorToBlocks();
+            log('[save] parsed blocks: ' + JSON.stringify(parsed));
+
+            // require image blocks to have attachmentId
+            const missing = parsed.filter(b => b.type === 'image' && !b.attachmentId);
+            if(missing.length > 0){
+                alert('存在未上传图片（无 attachmentId），请使用 插入图片 按钮重新插入或删除外链图片。');
+                el('btnSaveDiary').disabled = false;
+                return;
+            }
+
+            const blocksPayload = parsed.map(b => ({
+                blockId: b.blockId || null,
+                type: b.type,
+                content: b.type === 'text' ? (b.content || '') : null,
+                attachmentId: b.type === 'image' ? (b.attachmentId || null) : null,
+                metadata: null,
+                position: b.position
+            }));
+
+            const diary = {};
+            if(diaryIdVal) diary.id = Number(diaryIdVal);
+            if(diaryVersion) diary.version = Number(diaryVersion);
+            diary.title = title;
+
+            const res = await fetch(`${BASE}/api/diary/save`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ diary, blocks: blocksPayload })
+            });
+            const data = await res.json().catch(()=>null);
+            log(`[save] status=${res.status} body=${JSON.stringify(data)}`);
+            if(!res.ok){ alert('保存失败，请查看日志'); el('btnSaveDiary').disabled = false; return; }
+
+            // update diary id/version if returned
+            const result = data && data.data ? data.data : data;
+            if(result && result.diary){
+                el('diaryId').value = result.diary.id || '';
+                el('diaryVersion').value = result.diary.version || '';
+            }
+
+            // re-render editor from returned blocks (back-end usually injects attachmentUrl for image blocks)
+            if(result && result.blocks && Array.isArray(result.blocks)){
+                await renderEditorFromBlocks(result.blocks);
+            } else {
+                await renderDiaryPreviewFromEditor();
+            }
+
+            alert('保存成功');
+        }catch(e){
+            log('[save] error: ' + e.message);
+            alert('保存失败: ' + e.message);
+        }finally{
+            el('btnSaveDiary').disabled = false;
+        }
+    });
+
+    /* ---------- Load diary ---------- */
+    el('btnLoadDiary').addEventListener('click', async ()=>{
+        const id = el('diaryId').value;
+        if(!id){ alert('请输入 diaryId'); return; }
+        try{
+            const res = await fetch(`${BASE}/api/diary/id/${id}`, { method:'GET', credentials:'include', headers: Object.assign({}, authHeaders()) });
+            const data = await res.json().catch(()=>null);
+            log(`[load] status=${res.status} body=${JSON.stringify(data)}`);
+            if(!res.ok){ alert('加载失败'); return; }
+            const result = data.data ? data.data : data;
+            if(result && result.diary){
+                el('diaryTitle').value = result.diary.title || '';
+                el('diaryVersion').value = result.diary.version || '';
+                el('diaryId').value = result.diary.id || id;
+            }
+            const blocks = result.blocks || [];
+            await renderEditorFromBlocks(blocks);
+        }catch(e){ log('[load] ' + e.message); }
+    });
+
+    /* ---------- Render helpers ---------- */
+    async function renderEditorFromBlocks(blocks){
+        el('diaryEditor').innerHTML = '';
+        for(const b of blocks){
+            if(b.type === 'text'){
+                const d = document.createElement('div'); d.textContent = b.content || ''; el('diaryEditor').appendChild(d);
+            } else if(b.type === 'image'){
+                const wrapper = document.createElement('div');
+                const img = document.createElement('img');
+                img.style.maxWidth = '60%';
+                if(b.attachmentUrl){ img.src = b.attachmentUrl; if(b.attachmentId) img.dataset.attachmentId = String(b.attachmentId); }
+                else if(b.attachmentId){
+                    // fallback: try presigned-get
+                    try{
+                        const r = await fetch(`${BASE}/api/attachments/${b.attachmentId}/presigned-get?expiry=300`, { method:'GET', credentials:'include', headers:Object.assign({}, authHeaders()) });
+                        const j = await r.json().catch(()=>null);
+                        const url = j && (j.url || j.data) ? (j.url || j.data) : null;
+                        if(url) img.src = url;
+                        img.dataset.attachmentId = String(b.attachmentId);
+                    }catch(e){ img.src = ''; }
+                } else if(b.url) img.src = b.url || '';
+                wrapper.appendChild(img);
+                el('diaryEditor').appendChild(wrapper);
+            }
+        }
+        await renderDiaryPreviewFromEditor();
+    }
+
+    async function renderDiaryPreviewFromEditor(){
+        el('diaryPreview').innerHTML = '';
+        const children = Array.from(el('diaryEditor').childNodes);
+        for(const n of children){
+            if(n.nodeType === Node.TEXT_NODE){
+                if(n.textContent && n.textContent.trim()){
+                    const p = document.createElement('div'); p.textContent = n.textContent.trim(); el('diaryPreview').appendChild(p);
+                }
+            } else if(n.nodeType === Node.ELEMENT_NODE){
+                const tag = n.tagName.toLowerCase();
+                if(tag === 'div' && n.querySelector('img')){
+                    const imgEl = n.querySelector('img');
+                    const img = document.createElement('img');
+                    img.src = imgEl.dataset && imgEl.dataset.previewUrl ? imgEl.dataset.previewUrl : (imgEl.src || '');
+                    el('diaryPreview').appendChild(img);
+                } else {
+                    const txt = n.innerText || n.textContent || '';
+                    if(txt && txt.trim()){ const p=document.createElement('div'); p.textContent = txt.trim(); el('diaryPreview').appendChild(p); }
+                }
+            }
+        }
+    }
+
+    el('diaryEditor').addEventListener('input', ()=>{
+        if(window._deb) clearTimeout(window._deb);
+        window._deb = setTimeout(()=>{ renderDiaryPreviewFromEditor().catch(()=>{}); }, 200);
+    });
+
+    // initial
+    renderDiaryPreviewFromEditor().catch(()=>{});
+
+</script>
+</body>
+</html>
