@@ -20,7 +20,7 @@
     </style>
 </head>
 <body>
-<h2>测试：用户认证 & 收藏（一级/二级收藏夹 创建 & 查询；收藏项 创建 & 查询）</h2>
+<h2>测试：用户认证 & 收藏（一级/二级收藏夹 创建 & 查询；收藏项 创建 & 查询；删除）</h2>
 
 <div class="panel" id="authPanel">
     <h3>用户 (Auth)</h3>
@@ -53,6 +53,14 @@
                 <label>最近上传的 attachmentId: <input id="level1LastAttachmentId" readonly style="width:160px"></label>
                 <button id="btnCreateLevel1">创建 Level1 (/api/collection/folder/level1/createNewFolder)</button>
             </div>
+
+            <hr style="width:100%;margin:10px 0">
+
+            <h4>Level1 - 删除</h4>
+            <div class="flex">
+                <label>删除的 Level1 ID: <input id="level1DeleteId" style="width:120px" placeholder="id"></label>
+                <button id="btnDeleteLevel1">删除 Level1 (/api/collection/folder/level1/deleteFolder)</button>
+            </div>
         </div>
 
         <!-- Level1: get user folders -->
@@ -79,6 +87,14 @@
                 <button id="btnGetLevel2ByParent">获取 (/api/collection/folder/level2/getFoldersByParent)</button>
             </div>
             <div id="level2List" style="margin-top:8px" class="small">未查询</div>
+
+            <hr style="width:100%;margin:10px 0">
+
+            <h4>Level2 - 删除</h4>
+            <div class="flex">
+                <label>删除的 Level2 ID: <input id="level2DeleteId" style="width:120px" placeholder="id"></label>
+                <button id="btnDeleteLevel2">删除 Level2 (/api/collection/folder/level2/deleteFolder)</button>
+            </div>
         </div>
 
         <!-- Items: presign upload & create -->
@@ -96,6 +112,14 @@
                 <label>最近上传 attachmentId: <input id="itemLastAttachmentId" readonly style="width:160px"></label>
                 <button id="btnItemUpload">上传封面 (presign -> PUT -> complete) (/api/collection/item/presign)</button>
                 <button id="btnCreateItem">创建 Item (/api/collection/item/createCustom)</button>
+            </div>
+
+            <hr style="width:100%;margin:10px 0">
+
+            <h4>Item - 删除</h4>
+            <div class="flex">
+                <label>删除的 Item ID: <input id="itemDeleteId" style="width:120px" placeholder="id"></label>
+                <button id="btnDeleteItem">删除 Item (/api/collection/item/delete)</button>
             </div>
         </div>
 
@@ -119,7 +143,10 @@
 
 <script>
     /* Minimal test client for user + collection flows.
-       Fix: when listing level1 / items, prefer to show cover image using URL fields returned by backend (coverAttachmentUrl, attachmentUrl, coverUrl, url).
+       Adds tests for delete endpoints:
+         - POST /api/collection/folder/level1/deleteFolder  { id }
+         - POST /api/collection/folder/level2/deleteFolder  { id }
+         - POST /api/collection/item/delete                { id }
     */
 
     const BASE = 'https://localhost:8443';
@@ -227,6 +254,25 @@
         }catch(e){ log('[create level1] ' + e.message); }
     });
 
+    /* ---------- Level1: delete ---------- */
+    $('btnDeleteLevel1').addEventListener('click', async () => {
+        const id = Number($('level1DeleteId').value) || null;
+        if(!id){ alert('请输入要删除的 Level1 ID'); return; }
+        if(!confirm('确定删除一级收藏夹 id=' + id + ' ? 可能会级联删除其下二级/收藏项')) return;
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level1/deleteFolder`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ id })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[delete level1] status=${res.status} body=${JSON.stringify(body)}`);
+            alert('删除请求已发送，请查看日志');
+            // refresh list
+            $('btnGetUserLevel1').click();
+        }catch(e){ log('[delete level1] ' + e.message); }
+    });
+
     /* ---------- Level1: get user folders (show cover image, not attachmentId) ---------- */
     function pickImageUrl(obj){
         // prefer known keys that may contain the get-url returned by backend
@@ -252,7 +298,6 @@
                     const img = document.createElement('img'); img.className='cover-img'; img.src = imgUrl;
                     row.appendChild(img);
                 } else {
-                    // fallback small placeholder
                     const placeholder = document.createElement('div'); placeholder.className='cover-img'; placeholder.style.display='flex'; placeholder.style.alignItems='center'; placeholder.style.justifyContent='center'; placeholder.style.color='#999'; placeholder.textContent = '无图';
                     row.appendChild(placeholder);
                 }
@@ -302,6 +347,25 @@
         }catch(e){ log('[get level2] ' + e.message); }
     });
 
+    /* ---------- Level2: delete ---------- */
+    $('btnDeleteLevel2').addEventListener('click', async () => {
+        const id = Number($('level2DeleteId').value) || null;
+        if(!id){ alert('请输入要删除的 Level2 ID'); return; }
+        if(!confirm('确定删除二级收藏夹 id=' + id + ' ?')) return;
+        try{
+            const res = await fetch(`${BASE}/api/collection/folder/level2/deleteFolder`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ id })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[delete level2] status=${res.status} body=${JSON.stringify(body)}`);
+            alert('删除请求已发送，请查看日志');
+            // refresh parent list
+            $('btnGetLevel2ByParent').click();
+        }catch(e){ log('[delete level2] ' + e.message); }
+    });
+
     /* ---------- Items: presign upload & create ---------- */
     $('btnItemUpload').addEventListener('click', async () => {
         const f = $('itemFile').files[0];
@@ -347,6 +411,25 @@
             log(`[create item] status=${res.status} body=${JSON.stringify(body)}`);
             alert('创建请求已发送');
         }catch(e){ log('[create item] ' + e.message); }
+    });
+
+    /* ---------- Item: delete ---------- */
+    $('btnDeleteItem').addEventListener('click', async () => {
+        const id = Number($('itemDeleteId').value) || null;
+        if(!id){ alert('请输入要删除的 Item ID'); return; }
+        if(!confirm('确定删除收藏项 id=' + id + ' ?')) return;
+        try{
+            const res = await fetch(`${BASE}/api/collection/item/delete`, {
+                method:'POST', credentials:'include',
+                headers: Object.assign({'Content-Type':'application/json'}, authHeaders()),
+                body: JSON.stringify({ id })
+            });
+            const body = await res.json().catch(()=>null);
+            log(`[delete item] status=${res.status} body=${JSON.stringify(body)}`);
+            alert('删除请求已发送，请查看日志');
+            // refresh items list
+            $('btnGetItems').click();
+        }catch(e){ log('[delete item] ' + e.message); }
     });
 
     /* ---------- Items: getItems by father_level2_id (show cover image if backend provides URL) ---------- */

@@ -35,7 +35,7 @@ public interface CollectionFolderLevel1Mapper extends BaseMapper<User> {
     boolean updateCollectionFolderPath(@Param("new_attachment_id") Long new_attachment_id ,@Param("level1_id") Long level1_id);
 
     //删除一级收藏夹，级联删除，给我被修改的一级文件夹id
-    @Delete("DELETE FREOM collection_folders_level1 WHERE id = #{level1_id}")
+    @Delete("DELETE FROM collection_folders_level1 WHERE id = #{level1_id}")
     boolean deleteCollectionFolderLevel1(@Param("level1_id") Long level1_id);
 
 

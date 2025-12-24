@@ -30,7 +30,7 @@ public interface CollectionFolderLevel2Mapper extends BaseMapper<User> {
     boolean updateCollectionFolderName(@Param("new_name") String new_name,@Param("level2_id") Long level2_id);
 
     //删除二级收藏夹,给我被修改的二级文件夹id，级联删除
-    @Delete("DELETE FREOM collection_folders_level2 WHERE id = #{level2_id}")
+    @Delete("DELETE FROM collection_folders_level2 WHERE id = #{level2_id}")
     boolean deleteCollectionFolderLevel2(@Param("level2_id") Long level2_id);
 
 

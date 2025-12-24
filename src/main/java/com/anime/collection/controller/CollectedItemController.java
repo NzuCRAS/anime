@@ -112,7 +112,7 @@ public class CollectedItemController {
     }
 
     @Operation(summary = "更新收藏项封面", description = "更新指定收藏项的封面 attachment id")
-    @PutMapping("/update/cover")
+    @PostMapping("/update/cover")
     public ResponseEntity<Result<String>> updateCover(@RequestBody ItemUpdateCoverDTO dto,
                                                       @CurrentUser Long currentUserId) {
         try {
@@ -143,7 +143,7 @@ public class CollectedItemController {
     }
 
     @Operation(summary = "更新收藏项名称", description = "更新指定收藏项的名称")
-    @PutMapping("/update/name")
+    @PostMapping("/update/name")
     public ResponseEntity<Result<String>> updateName(@RequestBody ItemUpdateNameDTO dto,
                                                      @CurrentUser Long currentUserId) {
         try {
@@ -174,7 +174,7 @@ public class CollectedItemController {
     }
 
     @Operation(summary = "更新收藏项描述", description = "更新指定收藏项的描述")
-    @PutMapping("/update/description")
+    @PostMapping("/update/description")
     public ResponseEntity<Result<String>> updateDescription(@RequestBody ItemUpdateDescriptionDTO dto,
                                                             @CurrentUser Long currentUserId) {
         try {
@@ -202,7 +202,7 @@ public class CollectedItemController {
     }
 
     @Operation(summary = "删除收藏项", description = "删除指定收藏项（逻辑/物理删除由 service 决定）")
-    @DeleteMapping("/delete")
+    @PostMapping("/delete")
     public ResponseEntity<Result<String>> deleteItem(@RequestBody ItemDeleteDTO dto,
                                                      @CurrentUser Long currentUserId) {
         try {
