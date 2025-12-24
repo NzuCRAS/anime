@@ -70,6 +70,11 @@ public class CollectionFolderLevel1Service {
         if(level1_id == null){
             return false;
         }
+        try {
+            attachmentService.deleteAttachment(collectionFolderLevel1Mapper.getAttachmentIdByFolderId(level1_id), false);
+        } catch (Exception ex) {
+            log.error("收藏内容在文件系统中删除失败");
+        }
         return collectionFolderLevel1Mapper.deleteCollectionFolderLevel1(level1_id);
     }
 
