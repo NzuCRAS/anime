@@ -90,6 +90,8 @@ public class CollectedItemService {
         for (CollectedItem collectionItem : items) {
             ItemResultDTO itemResultDTO = new ItemResultDTO();
             itemResultDTO.setId(collectionItem.getId());
+            itemResultDTO.setDescription(collectionItem.getDescription());
+            itemResultDTO.setFolder_level2_id(level2Id);
             itemResultDTO.setName(collectionItem.getName());
             // 生成短期预签名 URL 用于前端展示
             try {
