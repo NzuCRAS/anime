@@ -5,12 +5,14 @@ import com.anime.common.entity.collection.CollectedItem;
 import com.anime.common.mapper.collection.CollectedItemMapper;
 import com.anime.common.service.AttachmentService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 public class CollectedItemService {
 
@@ -130,6 +132,11 @@ public class CollectedItemService {
     public boolean deleteCollectionItem(Long itemId) {
         if (itemId == null || itemId <= 0) {
             return false;
+        }
+        try {
+            attachmentService.deleteAttachment(collectedItemMapper.selectById(itemId).getAttachmentId(), false);
+        } catch (Exception ex) {
+            log.error("收藏内容在文件系统中删除失败");
         }
         return collectedItemMapper.deleteById(itemId) > 0;
     }

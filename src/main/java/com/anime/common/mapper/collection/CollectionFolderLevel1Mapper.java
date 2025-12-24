@@ -22,6 +22,9 @@ public interface CollectionFolderLevel1Mapper extends BaseMapper<User> {
     @Insert("INSERT INTO collection_folders_level1 VALUES  (NULL,#{name},#{attachment_id},NOW(),#{user_id})")
     boolean createCollectionFolderLevel1(@Param("name") String name,@Param("attachment_id") Long attachmentId, @Param("user_id") Long user_id);
 
+    @Select("SELECT attachment_Id FROM collection_folders_level1 WHERE id = #{folderId}")
+    Long getAttachmentIdByFolderId(@Param("folderId") Long folderId);
+
     //查询所有一级文件夹，给我用户id
     @Select("SELECT * FROM collection_folders_level1 WHERE user_id = #{user_id}")
     List<CollectionFolderLevel1> findByUserId(@Param("user_id") Long user_id);

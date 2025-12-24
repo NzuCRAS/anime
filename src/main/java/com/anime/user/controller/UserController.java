@@ -300,6 +300,7 @@ public class UserController {
 
         // 4) 调用 service 更新用户 avatar（当前实现 userService.PostUserAvatar 会写入 DB）
         try {
+            Long lastAttachmentId = userService.getAvatarAttachmentId(userId);
             Boolean ok = userService.PostUserAvatar(userId, attachmentId);
             if (Boolean.TRUE.equals(ok)) {
                 // 返回新的 avatar presigned url 给前端做确认/预览（可选）
@@ -308,6 +309,11 @@ public class UserController {
                     avatarUrl = attachmentService.generatePresignedGetUrl(attachmentId, 300L);
                 } catch (Exception e) {
                     log.debug("postUserAvatar: presigned-get failed for {}: {}", attachmentId, e.getMessage());
+                }
+                try {
+                    attachmentService.deleteAttachment(lastAttachmentId, false);
+                } catch (Exception ex) {
+                    log.warn("postUserAvatar: failed to delete last attachment {}: {}", attachmentId, ex.getMessage());
                 }
                 java.util.Map<String, Object> resp = new java.util.HashMap<>();
                 resp.put("attachmentId", attachmentId);
