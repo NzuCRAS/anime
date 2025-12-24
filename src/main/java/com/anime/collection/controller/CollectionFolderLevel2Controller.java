@@ -71,7 +71,7 @@ public class CollectionFolderLevel2Controller {
     }
 
     @Operation(summary = "更新二级收藏夹名称", description = "根据 id 更新二级收藏夹名称")
-    @PutMapping("/updateFolderName")
+    @PostMapping("/updateFolderName")
     public ResponseEntity<Result<String>> updateFolderName(@RequestBody Level2UpdateNameDTO dto,
                                                            @CurrentUser Long currentUserId) {
         try {
@@ -96,7 +96,7 @@ public class CollectionFolderLevel2Controller {
     }
 
     @Operation(summary = "删除二级收藏夹", description = "根据 id 删除二级收藏夹（可能会级联删除）")
-    @DeleteMapping("/deleteFolder")
+    @PostMapping("/deleteFolder")
     public ResponseEntity<Result<String>> deleteFolder(@RequestBody Level2DeleteDTO dto,
                                                        @CurrentUser Long currentUserId) {
         try {

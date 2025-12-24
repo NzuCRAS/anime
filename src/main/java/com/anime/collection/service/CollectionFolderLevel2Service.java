@@ -37,8 +37,8 @@ public class CollectionFolderLevel2Service {
         }
         List<CollectionFolderLevel2> level2 = collectionFolderLevel2Mapper.findByFatherId(father_id);
         List<Levev2ResultDTO> results = new ArrayList<>();
-        Levev2ResultDTO levev2ResultDTO = new Levev2ResultDTO();
         for (CollectionFolderLevel2 collectionFolderLevel2 : level2) {
+            Levev2ResultDTO levev2ResultDTO = new Levev2ResultDTO();
             levev2ResultDTO.setId(collectionFolderLevel2.getId());
             levev2ResultDTO.setName(collectionFolderLevel2.getName());
             levev2ResultDTO.setFather_id(collectionFolderLevel2.getParentFolderId());

@@ -95,7 +95,7 @@ public class CollectionFolderLevel1Controller {
     }
 
     @Operation(summary = "更新一级收藏夹名称", description = "根据 id 更新收藏夹名称")
-    @PutMapping("/updateFolderName")
+    @PostMapping("/updateFolderName")
     public ResponseEntity<Result<String>> updateFolderName(@RequestBody Level1UpdateNameDTO dto,
                                                            @CurrentUser Long currentUserId) {
         try {
@@ -120,7 +120,7 @@ public class CollectionFolderLevel1Controller {
     }
 
     @Operation(summary = "更新一级收藏夹封面", description = "更新指定一级收藏夹的封面 attachment id")
-    @PutMapping("/updateFolderCover")
+    @PostMapping("/updateFolderCover")
     public ResponseEntity<Result<String>> updateFolderCover(@RequestBody Leve1UpdateCoverDTO dto,
                                                             @CurrentUser Long currentUserId) {
         try {
@@ -145,7 +145,7 @@ public class CollectionFolderLevel1Controller {
     }
 
     @Operation(summary = "删除一级收藏夹", description = "根据 id 删除一级收藏夹（可能会级联删除）")
-    @DeleteMapping("/deleteFolder")
+    @PostMapping("/deleteFolder")
     public ResponseEntity<Result<String>> deleteFolder(@RequestBody Level1DeleteDTO dto,
                                                        @CurrentUser Long currentUserId) {
         try {
