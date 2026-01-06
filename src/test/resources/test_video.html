@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <title>Anime 视频模块测试页</title>
+    <style>
+        body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin: 18px; max-width:1100px; }
+        h1 { margin-bottom: 8px; }
+        .section { border:1px solid #ddd; padding:12px; margin-bottom:14px; border-radius:6px; }
+        label { display:inline-block; width:160px; vertical-align:top; }
+        input[type="text"], input[type="password"], input[type="number"], textarea { width:420px; padding:6px; }
+        textarea { height:80px; }
+        button { margin-left:6px; padding:6px 10px; }
+        #log { background:#111; color:#eee; padding:10px; height:260px; overflow:auto; font-family:monospace; white-space:pre-wrap; }
+        .small { color:#666; font-size:13px; }
+        video { width:100%; max-width:900px; background:#000; }
+        table { border-collapse:collapse; width:100%; margin-top:8px; }
+        th, td { border:1px solid #ddd; padding:6px; text-align:left; font-size:13px; }
+        .quality-btn { padding:6px 10px; border:1px solid #ccc; background:#f7f7f7; margin-right:6px; border-radius:4px; cursor:pointer; }
+        .quality-btn.active { background:#007bff; color:#fff; border-color:#007bff; }
+        .quality-container { margin-top:8px; }
+    </style>
+    <!-- hls.js for HLS playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.0/dist/hls.min.js"></script>
+</head>
+<body>
+<h1>Anime 视频模块测试页</h1>
+
+<div class="section">
+    <div><label>后端 Base URL</label><input id="baseUrl" type="text" value="https://localhost:8443"></div>
+    <div class="small">注意：若后端在不同端口或使用 HTTPS，请修改上面地址。</div>
+    <div style="margin-top:8px;">
+        accessToken: <span id="tokenDisplay">(未登录)</span>
+    </div>
+</div>
+
+<div class="section">
+    <h2>1) 用户登录 (/api/user/login)</h2>
+    <div><label>用户名或邮箱</label><input id="loginUsername" type="text"></div>
+    <div><label>密码</label><input id="loginPassword" type="password"> <button onclick="doLogin()">登录</button></div>
+    <div class="small">成功后会保存 accessToken（从响应头 New-Access-Token）并用于后续请求。</div>
+</div>
+
+<div class="section">
+    <h2>2) 上传视频文件（预签名 + PUT）</h2>
+    <div><label>选择文件 (mp4)</label><input id="fileInput" type="file" accept="video/mp4"></div>
+    <div style="margin-top:8px;">
+        <label>Presign API (用于生成 PUT URL)</label>
+        <input id="presignApi" type="text" value="/api/user/presign">
+        <span class="small">若你有专门的 attachment presign 接口，请填写完整路径或相对路径</span>
+    </div>
+    <div style="margin-top:8px;">
+        <label>上传后的 attachmentId</label>
+        <input id="uploadedAttachmentId" type="text" readonly>
+    </div>
+    <div style="margin-top:8px;">
+        <button onclick="doPresignAndUpload()">生成 Presign 并上传</button>
+    </div>
+    <div class="small" style="margin-top:6px;">
+        流程：1) 调用 Presign 接口 -> 2) 得到 uploadUrl & headers -> 3) 直接 PUT 文件到该 URL -> 4) 成功后前端会显示 attachmentId（可用于创建 video）
+    </div>
+</div>
+
+<div class="section">
+    <h2>3) 创建视频记录（提交 metadata, 自动触发后台转码）</h2>
+    <div><label>sourceAttachmentId</label><input id="createSourceAttachmentId" type="text"></div>
+    <div><label>封面 attachmentId (可选)</label><input id="createCoverAttachmentId" type="text"></div>
+    <div><label>标题</label><input id="createTitle" type="text"></div>
+    <div><label>描述</label><textarea id="createDesc"></textarea></div>
+    <div style="margin-top:8px;"><button onclick="createVideo()">创建视频（并触发转码）</button></div>
+    <div class="small">创建后后端会异步转码，转码完成后 video.status 会变为 ready。</div>
+    <div id="createdInfo" style="margin-top:8px;"></div>
+</div>
+
+<div class="section">
+    <h2>4) 查看视频状态 / 播放</h2>
+    <div><label>VideoId</label><input id="videoIdQuery" type="number"> <button onclick="queryVideo()">查询状态</button></div>
+    <div style="margin-top:8px;">
+        <label>播放 (HLS)</label>
+        <button onclick="getPlayHls()">获取 master.m3u8 并播放</button>
+    </div>
+    <div style="margin-top:8px;">
+        <video id="player" controls></video>
+        <div class="small">若浏览器不原生支持 HLS，页面使用 hls.js 来播放 master.m3u8。</div>
+        <div class="quality-container" id="qualityContainer" style="margin-top:8px;"></div>
+    </div>
+    <div style="margin-top:8px;">
+        <button onclick="toggleLike()">点赞/取消点赞</button>
+        <span id="likeInfo" class="small"></span>
+    </div>
+</div>
+
+<div class="section">
+    <h2>5) 上报播放质量 / ABR 指标</h2>
+    <div><label>sessionUuid</label><input id="abrSessionUuid" type="text" value=""></div>
+    <div><label>avgBitrate (bps)</label><input id="abrAvgBitrate" type="number" value="1200000"></div>
+    <div><label>startupDelayMs</label><input id="abrStartup" type="number" value="500"></div>
+    <div><label>rebufferCount</label><input id="abrRebuf" type="number" value="0"></div>
+    <div><label>totalRebufferMs</label><input id="abrTotalRebuf" type="number" value="0"></div>
+    <div style="margin-top:8px;"><button onclick="reportMetrics()">上报指标</button></div>
+</div>
+
+<div class="section">
+    <h2>控制台 / 日志</h2>
+    <div id="log"></div>
+    <div style="margin-top:8px;"><button onclick="clearLog()">清空控制台</button></div>
+</div>
+
+<script>
+    let accessToken = null;
+    let currentVideoUrl = null;
+    const logEl = document.getElementById('log');
+
+    function log(msg, obj) {
+        const t = new Date().toISOString();
+        logEl.textContent += `[${t}] ${msg}\n`;
+        if (obj !== undefined) {
+            try { logEl.textContent += JSON.stringify(obj, null, 2) + '\n'; }
+            catch (e) { logEl.textContent += String(obj) + '\n'; }
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    function clearLog() { logEl.textContent = ''; }
+
+    function getBaseUrl() {
+        return document.getElementById('baseUrl').value.replace(/\/+$/, '');
+    }
+
+    function setToken(t) {
+        accessToken = t;
+        document.getElementById('tokenDisplay').textContent = t ? t : '(未登录)';
+    }
+
+    // 1) 登录
+    async function doLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+        if (!username || !password) { alert('请输入用户名和密码'); return; }
+        const url = getBaseUrl() + '/api/user/login';
+        const body = { usernameOrEmail: username, password: password };
+        log('HTTP POST ' + url, body);
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                credentials: 'include'
+            });
+            const newAccess = resp.headers.get('New-Access-Token');
+            if (newAccess) {
+                setToken(newAccess);
+                log('Got New-Access-Token from header');
+            } else {
+                log('No New-Access-Token header returned');
+            }
+            const json = await resp.json().catch(()=>null);
+            log('HTTP RES ' + resp.status, json);
+            if (resp.status === 200) alert('登录成功');
+            else alert('登录可能失败，请查看控制台');
+        } catch (e) {
+            log('login error', e);
+            alert('登录请求失败，请看控制台');
+        }
+    }
+
+    // helper: do authenticated POST (uses accessToken if set)
+    async function apiPost(path, body, raw=false) {
+        const url = (path.startsWith('http') ? path : getBaseUrl() + path);
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+        log('HTTP POST ' + url, body);
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: body ? JSON.stringify(body) : '{}',
+            credentials: 'include'
+        });
+        const text = await resp.text();
+        let json = null;
+        try { json = JSON.parse(text); } catch(e) { json = text; }
+        log(`HTTP ${resp.status} ${url}`, json);
+        if (!raw) return { status: resp.status, data: json };
+        return { status: resp.status, rawText: text, data: json };
+    }
+
+    // 2) presign and upload
+    async function doPresignAndUpload() {
+        const fInput = document.getElementById('fileInput');
+        if (!fInput.files || fInput.files.length === 0) { alert('请选择文件'); return; }
+        const file = fInput.files[0];
+        const presignApiRaw = document.getElementById('presignApi').value.trim();
+        if (!presignApiRaw) { alert('请填写预签名接口路径'); return; }
+        // build request body - follow UserController.presign DTO (originalFilename, mimeType)
+        const body = { originalFilename: file.name, mimeType: file.type || 'video/mp4' };
+        try {
+            // call presign endpoint (may return DTO directly)
+            const presignUrl = presignApiRaw.startsWith('http') ? presignApiRaw : getBaseUrl() + presignApiRaw;
+            log('Calling presign API: ' + presignUrl, body);
+            const resp = await fetch(presignUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {}) },
+                body: JSON.stringify(body),
+                credentials: 'include'
+            });
+            const json = await resp.json();
+            log('presign response', json);
+            // presign DTO may be returned directly (not wrapped). Try to find url and id.
+            let putUrl = null, attachmentId = null, putHeaders = null;
+            if (json && json.putUrl) {
+                putUrl = json.putUrl;
+                attachmentId = json.attachmentId || json.id || null;
+                putHeaders = json.putHeaders || json.headers || null;
+            } else if (json && json.url) {
+                putUrl = json.url;
+                attachmentId = json.id || json.attachmentId || null;
+                putHeaders = json.headers || null;
+            } else if (json && json.data) {
+                const d = json.data;
+                if (d.putUrl) {
+                    putUrl = d.putUrl;
+                    attachmentId = d.attachmentId || d.id || null;
+                    putHeaders = d.putHeaders || d.headers || null;
+                } else if (Array.isArray(d.items) && d.items.length > 0) {
+                    const it = d.items[0];
+                    putUrl = it.putUrl || it.url || null;
+                    attachmentId = it.attachmentId || it.id || null;
+                    putHeaders = it.putHeaders || it.headers || null;
+                } else if (d.url) {
+                    putUrl = d.url;
+                    attachmentId = d.id || d.attachmentId || null;
+                    putHeaders = d.headers || null;
+                }
+            }
+            if (!putUrl) {
+                alert('Presign API 返回格式无法解析，请检查接口。控制台有详情。');
+                return;
+            }
+            const allowedPutHeaders = {};
+            if (putHeaders && typeof putHeaders === 'object') {
+                for (const k of Object.keys(putHeaders)) {
+                    const lk = k.toLowerCase();
+                    if (lk === 'host') continue;
+                    if (lk === 'content-type') {
+                        allowedPutHeaders['Content-Type'] = putHeaders[k];
+                        continue;
+                    }
+                    if (lk.startsWith('x-amz-') || lk.startsWith('cache-control') || lk.startsWith('content-disposition')) {
+                        allowedPutHeaders[k] = putHeaders[k];
+                    }
+                }
+            }
+            if (!allowedPutHeaders['Content-Type']) {
+                allowedPutHeaders['Content-Type'] = file.type || 'application/octet-stream';
+            }
+            log('PUT to presigned URL, headers', allowedPutHeaders);
+            const putResp = await fetch(putUrl, {
+                method: 'PUT',
+                headers: allowedPutHeaders,
+                body: file
+            });
+            if (putResp.status >= 200 && putResp.status < 300) {
+                log('Upload PUT OK', { status: putResp.status });
+                if (attachmentId) {
+                    document.getElementById('uploadedAttachmentId').value = attachmentId;
+                    document.getElementById('createSourceAttachmentId').value = attachmentId;
+                } else {
+                    log('Presign did not return attachmentId; you may need to call backend to finalize attachment.');
+                }
+                alert('文件上传成功（已 PUT 到存储）');
+            } else {
+                const txt = await putResp.text();
+                log('PUT failed', { status: putResp.status, text: txt });
+                alert('上传失败，请查看控制台');
+            }
+        } catch (e) {
+            log('presign/upload error', e);
+            alert('上传过程中出错，请查看控制台');
+        }
+    }
+
+    // 3) create video
+    async function createVideo() {
+        const srcId = document.getElementById('createSourceAttachmentId').value.trim();
+        if (!srcId) { alert('请填写 sourceAttachmentId'); return; }
+        const title = document.getElementById('createTitle').value.trim();
+        const desc = document.getElementById('createDesc').value.trim();
+        const cover = document.getElementById('createCoverAttachmentId').value.trim() || null;
+        const body = { uploaderId: null, sourceAttachmentId: Number(srcId), coverAttachmentId: cover ? Number(cover) : null, title, description: desc };
+        const res = await apiPost('/api/videos', body);
+        if (res.status === 200 && res.data) {
+            const vid = (res.data.data && res.data.data.videoId) ? res.data.data.videoId : (res.data.videoId ? res.data.videoId : res.data);
+            document.getElementById('createdInfo').textContent = 'Created videoId: ' + JSON.stringify(res.data);
+            if (vid) document.getElementById('videoIdQuery').value = vid;
+            alert('创建完成，后台会开始转码（异步）');
+        } else {
+            alert('创建失败，请查看控制台');
+        }
+    }
+
+    // 4) query video status
+    async function queryVideo() {
+        const id = document.getElementById('videoIdQuery').value.trim();
+        if (!id) { alert('请输入 videoId'); return; }
+        const res = await apiPost('/api/videos/' + id + '/get', {});
+        if (res.status === 200 && res.data) {
+            log('Video get', res.data);
+            const data = res.data.data || res.data;
+            const v = data.video || data;
+            const trans = data.transcodes || [];
+            let s = 'Video: ' + (v.title || '') + ' (status=' + (v.status || '') + ')\n';
+            s += 'Transcodes:\n';
+            for (const t of trans) {
+                s += ` - ${t.representationId} : ${t.status} (${t.manifestPath})\n`;
+            }
+            alert(s);
+        } else {
+            alert('查询失败，请查看控制台');
+        }
+    }
+
+    // 4b) get play HLS and play in <video>
+    async function getPlayHls() {
+        const id = document.getElementById('videoIdQuery').value.trim();
+        if (!id) { alert('请输入 videoId'); return; }
+        try {
+            // load via backend proxy endpoint that rewrites playlists and returns presigned segment URLs
+            const playlistUrl = getBaseUrl() + '/api/videos/' + id + '/hls/playlist?name=master.m3u8&expiry=300';
+            log('Loading master playlist via backend proxy: ' + playlistUrl);
+            playHlsInPlayer(playlistUrl);
+        } catch (e) {
+            log('getPlayHls error', e);
+            alert('获取播放地址失败');
+        }
+    }
+
+    // hls.js playback with manual quality switching
+    let hlsInstance = null;
+    let currentLevelIndex = -1; // -1 = auto
+    function clearQualityButtons() {
+        const container = document.getElementById('qualityContainer');
+        container.innerHTML = '';
+    }
+    function renderQualityButtons(levels) {
+        const container = document.getElementById('qualityContainer');
+        container.innerHTML = ''; // clear
+        if (!levels || levels.length === 0) return;
+        // Auto button
+        const autoBtn = document.createElement('button');
+        autoBtn.className = 'quality-btn active';
+        autoBtn.textContent = 'Auto';
+        autoBtn.onclick = () => { switchQuality(-1); };
+        container.appendChild(autoBtn);
+
+        levels.forEach((lvl, idx) => {
+            const btn = document.createElement('button');
+            btn.className = 'quality-btn';
+            const label = (lvl.height ? (lvl.height + 'p') : (Math.round(lvl.bitrate/1000) + 'kbps'));
+            btn.textContent = label;
+            btn.dataset.level = idx;
+            btn.onclick = () => { switchQuality(Number(btn.dataset.level)); };
+            container.appendChild(btn);
+        });
+    }
+    function updateQualityButtonActive(index) {
+        const container = document.getElementById('qualityContainer');
+        const buttons = container.querySelectorAll('.quality-btn');
+        buttons.forEach((b, i) => {
+            // first button is Auto (i=0)
+            if (index === -1) {
+                // auto active
+                if (i === 0) b.classList.add('active'); else b.classList.remove('active');
+            } else {
+                if (i === index + 1) b.classList.add('active'); else b.classList.remove('active');
+            }
+        });
+    }
+    function switchQuality(levelIndex) {
+        if (!hlsInstance) return;
+        if (levelIndex === -1) {
+            // enable automatic
+            hlsInstance.currentLevel = -1;
+            hlsInstance.autoLevelEnabled = true;
+            currentLevelIndex = -1;
+            updateQualityButtonActive(-1);
+            return;
+        }
+        // manual switch
+        hlsInstance.autoLevelEnabled = false;
+        hlsInstance.currentLevel = levelIndex;
+        currentLevelIndex = levelIndex;
+        updateQualityButtonActive(levelIndex);
+    }
+
+    function playHlsInPlayer(url) {
+        const v = document.getElementById('player');
+        currentVideoUrl = url;
+        clearQualityButtons();
+        if (hlsInstance) {
+            try { hlsInstance.destroy(); } catch(e) {}
+            hlsInstance = null;
+        }
+        if (Hls && Hls.isSupported()) {
+            hlsInstance = new Hls({
+                xhrSetup: function(xhr, url) {
+                    // If your playlist endpoint requires Authorization, uncomment:
+                    // if (accessToken) xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+                }
+            });
+            hlsInstance.loadSource(url);
+            hlsInstance.attachMedia(v);
+            hlsInstance.on(Hls.Events.MANIFEST_PARSED, function(_, data) {
+                // data.levels contains available quality levels
+                renderQualityButtons(hlsInstance.levels || []);
+                updateQualityButtonActive(-1); // default auto active
+                // auto play
+                v.play().catch(()=>{});
+            });
+            // reflect level switch in UI
+            hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+                const level = data?.level;
+                if (typeof level === 'number') {
+                    currentLevelIndex = level;
+                    updateQualityButtonActive(level);
+                }
+            });
+            // Handle errors
+            hlsInstance.on(Hls.Events.ERROR, function(event, data) {
+                log('hls error', data);
+            });
+        } else {
+            // Native HLS (Safari) - manual quality switching not supported here
+            v.src = url;
+            v.addEventListener('loadedmetadata', () => v.play().catch(()=>{}), { once: true });
+            // show a note
+            const container = document.getElementById('qualityContainer');
+            container.innerHTML = '<div class="small">使用 Safari 原生 HLS，手动清晰度切换不可用（请使用支持 hls.js 的浏览器以启用手动切换）</div>';
+        }
+    }
+
+    // toggle like
+    async function toggleLike() {
+        const id = document.getElementById('videoIdQuery').value.trim();
+        if (!id) { alert('请输入 videoId'); return; }
+        const res = await apiPost('/api/videos/' + id + '/like', {});
+        if (res.status === 200) {
+            const dat = res.data.data || res.data;
+            document.getElementById('likeInfo').textContent = 'liked=' + dat.liked + ' count=' + dat.likeCount;
+            alert('toggleLike done');
+        } else {
+            alert('toggleLike failed');
+        }
+    }
+
+    // report metrics
+    async function reportMetrics() {
+        const uuid = document.getElementById('abrSessionUuid').value.trim() || ('sess-' + Math.random().toString(36).slice(2,10));
+        const videoId = Number(document.getElementById('videoIdQuery').value.trim());
+        if (!videoId) { alert('请先设置 videoId'); return; }
+        const body = {
+            sessionUuid: uuid,
+            videoId,
+            playDurationMs: Number(document.getElementById('abrPlayDuration')?.value || 0),
+            avgBitrate: Number(document.getElementById('abrAvgBitrate').value || 0),
+            startupDelayMs: Number(document.getElementById('abrStartup').value || 0),
+            rebufferCount: Number(document.getElementById('abrRebuf').value || 0),
+            totalRebufferMs: Number(document.getElementById('abrTotalRebuf').value || 0)
+        };
+        const res = await apiPost('/api/videos/reportMetrics', body);
+        if (res.status === 200) alert('reportMetrics ok'); else alert('reportMetrics fail');
+    }
+
+    // helper apiPost that returns parsed Result
+    async function apiPost(path, body) {
+        const url = getBaseUrl() + path;
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+        log('HTTP POST ' + url, body);
+        const resp = await fetch(url, { method: 'POST', headers, body: body ? JSON.stringify(body) : '{}' , credentials:'include' });
+        const text = await resp.text();
+        let json = null;
+        try { json = JSON.parse(text); } catch(e) { json = text; }
+        log('HTTP ' + resp.status + ' ' + url, json);
+        return { status: resp.status, data: json };
+    }
+</script>
+</body>
+</html>

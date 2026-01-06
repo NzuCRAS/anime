@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <title>好友接口测试页</title>
+    <style>
+        body{font-family:Arial,Helvetica,sans-serif;margin:16px;}
+        .box{border:1px solid #ccc;padding:12px;margin-bottom:12px;border-radius:6px;}
+        label{display:inline-block;width:120px}
+        input,textarea{padding:6px;width:380px}
+        button{padding:6px 10px;margin-left:6px}
+        #log{height:240px;overflow:auto;background:#111;color:#eee;padding:8px;font-family:monospace;white-space:pre-wrap}
+        .small{color:#666;font-size:13px}
+        table{border-collapse:collapse;width:100%}
+        th,td{border:1px solid #ddd;padding:6px}
+    </style>
+</head>
+<body>
+<h1>好友接口测试</h1>
+
+<div class="box">
+    <div><label>Base URL</label><input id="baseUrl" value="https://localhost:8443"></div>
+    <div style="margin-top:8px">Token: <span id="tokenLabel">(未登录)</span></div>
+</div>
+
+<div class="box">
+    <h3>登录 / 获取 Token</h3>
+    <div><label>用户名或邮箱</label><input id="loginUser" value="testuser"></div>
+    <div style="margin-top:6px"><label>密码</label><input id="loginPass" type="password" value="password"> <button onclick="doLogin()">登录</button></div>
+    <div class="small">登录成功后，服务端会在响应头返回 New-Access-Token，测试页会保存并用于后续请求。</div>
+</div>
+
+<div class="box">
+    <h3>发送好友请求</h3>
+    <div><label>目标 userId</label><input id="sendToUserId"></div>
+    <div style="margin-top:6px"><label>Message</label><input id="sendMessage" placeholder="Hi, let's be friends"> <button onclick="sendFriendRequest()">发送请求</button></div>
+</div>
+
+<div class="box">
+    <h3>列出收到的好友请求</h3>
+    <div><button onclick="listIncomingRequests()">刷新请求列表</button></div>
+    <div id="requestsArea" style="margin-top:8px"></div>
+</div>
+
+<div class="box">
+    <h3>处理请求（接受 / 拒绝）</h3>
+    <div><label>requestId</label><input id="respondRequestId"></div>
+    <div style="margin-top:6px"><label>action</label>
+        <select id="respondAction"><option value="accept">accept</option><option value="reject">reject</option></select>
+        <button onclick="respondFriendRequest()">处理</button>
+    </div>
+</div>
+
+<div class="box">
+    <h3>按用户名精确搜索</h3>
+    <div><label>username</label><input id="searchUsername"> <button onclick="searchUser()">搜索</button></div>
+    <div id="searchResult" style="margin-top:8px"></div>
+</div>
+
+<div class="box">
+    <h3>好友列表 / 删除好友</h3>
+    <div><button onclick="listFriends()">刷新好友列表</button></div>
+    <div id="friendsArea" style="margin-top:8px"></div>
+    <div style="margin-top:8px"><label>删除 friendId</label><input id="removeFriendId"> <button onclick="removeFriend()">删除</button></div>
+</div>
+
+<div class="box">
+    <h3>控制台</h3>
+    <div id="log"></div>
+</div>
+
+<script>
+    let accessToken = null;
+    const logEl = document.getElementById('log');
+
+    function log(msg, obj) {
+        const t = new Date().toISOString();
+        logEl.textContent += `[${t}] ${msg}\n`;
+        if (obj !== undefined) {
+            try { logEl.textContent += JSON.stringify(obj, null, 2) + '\n'; } catch(e){ logEl.textContent += String(obj) + '\n'; }
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    function getBaseUrl(){ return document.getElementById('baseUrl').value.replace(/\/+$/,''); }
+    function setToken(t){ accessToken = t; document.getElementById('tokenLabel').textContent = t ? t : '(未登录)'; }
+
+    async function doLogin(){
+        const user = document.getElementById('loginUser').value;
+        const pass = document.getElementById('loginPass').value;
+        const url = getBaseUrl() + '/api/user/login';
+        const body = { usernameOrEmail: user, password: pass };
+        log('POST ' + url, body);
+        try {
+            const resp = await fetch(url, {
+                method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), credentials:'include'
+            });
+            const newToken = resp.headers.get('New-Access-Token');
+            if (newToken) setToken(newToken);
+            const data = await resp.json().catch(()=>null);
+            log('RESP ' + resp.status, data);
+            if (resp.status === 200) alert('登录成功'); else alert('登录可能失败');
+        } catch (e) { log('login error', e); alert('login failed'); }
+    }
+
+    async function apiPost(path, body){
+        const url = getBaseUrl() + path;
+        const headers = {'Content-Type':'application/json'};
+        if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+        log('POST ' + url, body);
+        const resp = await fetch(url, { method:'POST', headers, body: body?JSON.stringify(body):'{}', credentials:'include' });
+        const text = await resp.text();
+        let json = null;
+        try{ json = JSON.parse(text); }catch(e){ json = text; }
+        log('RESP ' + resp.status + ' ' + url, json);
+        return { status: resp.status, data: json };
+    }
+
+    // send friend request
+    async function sendFriendRequest(){
+        const to = Number(document.getElementById('sendToUserId').value);
+        const message = document.getElementById('sendMessage').value;
+        if (!to) { alert('请输入 toUserId'); return; }
+        const res = await apiPost('/api/chat/friends/request/send', { toUserId: to, message });
+        if (res.status===200) alert('请求已发送: ' + JSON.stringify(res.data));
+        else alert('发送失败');
+    }
+
+    // list incoming requests
+    async function listIncomingRequests(){
+        const res = await apiPost('/api/chat/friends/request/list', {});
+        const area = document.getElementById('requestsArea');
+        area.innerHTML = '';
+        if (res.status===200 && res.data && res.data.data){
+            const items = res.data.data.items || res.data.items || [];
+            if (items.length === 0) { area.textContent = '无请求'; return; }
+            const tbl = document.createElement('table');
+            const hdr = document.createElement('tr'); hdr.innerHTML='<th>requestId</th><th>fromUserId</th><th>username</th><th>message</th><th>createdAt</th>'; tbl.appendChild(hdr);
+            items.forEach(it=>{
+                const r = document.createElement('tr');
+                r.innerHTML = `<td>${it.requestId}</td><td>${it.fromUserId}</td><td>${it.fromUsername || ''}</td><td>${it.message||''}</td><td>${it.createdAt||''}</td>`;
+                tbl.appendChild(r);
+            });
+            area.appendChild(tbl);
+        } else {
+            area.textContent = '请求列表获取失败';
+        }
+    }
+
+    // respond request
+    async function respondFriendRequest(){
+        const id = Number(document.getElementById('respondRequestId').value);
+        const action = document.getElementById('respondAction').value;
+        if (!id) { alert('请输入 requestId'); return; }
+        const res = await apiPost('/api/chat/friends/request/respond', { requestId: id, action });
+        if (res.status===200) { alert('处理成功'); listIncomingRequests(); listFriends(); }
+        else alert('处理失败');
+    }
+
+    // search user
+    async function searchUser(){
+        const username = document.getElementById('searchUsername').value;
+        if (!username) { alert('请输入用户名'); return; }
+        const res = await apiPost('/api/chat/friends/search', { username });
+        const area = document.getElementById('searchResult');
+        area.innerHTML = '';
+        if (res.status===200 && res.data){
+            const items = (res.data.data && res.data.data.items) || res.data.items || [];
+            if (items.length === 0) { area.textContent = '未找到用户'; return; }
+            items.forEach(i=>{
+                const d = document.createElement('div');
+                d.innerHTML = `<b>${i.username}</b> (id=${i.id})<br/>签名: ${i.personalSignature || ''}<br/>头像: ${i.avatarUrl || ''}`;
+                area.appendChild(d);
+            });
+        } else area.textContent = '搜索失败';
+    }
+
+    // list friends
+    async function listFriends(){
+        const res = await apiPost('/api/chat/friends/list', {});
+        const area = document.getElementById('friendsArea');
+        area.innerHTML = '';
+        if (res.status===200 && res.data){
+            const friends = (res.data.data && res.data.data.friends) || res.data.friends || [];
+            if (friends.length === 0) { area.textContent = '无好友'; return; }
+            const tbl = document.createElement('table');
+            const hdr = document.createElement('tr'); hdr.innerHTML='<th>id</th><th>username</th><th>email</th><th>avatar</th>'; tbl.appendChild(hdr);
+            friends.forEach(f=>{
+                const row = document.createElement('tr');
+                row.innerHTML = `<td>${f.id}</td><td>${f.username}</td><td>${f.email||''}</td><td>${f.avatarUrl||''}</td>`;
+                tbl.appendChild(row);
+            });
+            area.appendChild(tbl);
+        } else area.textContent = '好友列表获取失败';
+    }
+
+    // remove friend
+    async function removeFriend(){
+        const id = Number(document.getElementById('removeFriendId').value);
+        if (!id) { alert('请输入 friendId'); return; }
+        const res = await apiPost('/api/chat/friends/remove', { friendId: id });
+        if (res.status===200) { alert('删除成功'); listFriends(); } else alert('删除失败');
+    }
+</script>
+</body>
+</html>

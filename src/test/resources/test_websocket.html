@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Anime Chat 测试页（含未读/已读/删除）</title>
+    <style>
+        body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin: 20px; }
+        h2 { margin-top: 24px; }
+        .section { border: 1px solid #ccc; padding: 12px; margin-bottom: 16px; border-radius: 4px; }
+        .row { margin-bottom: 6px; }
+        label { display: inline-block; width: 140px; }
+        input[type="text"], input[type="password"], input[type="number"] { width: 260px; }
+        button { margin-left: 4px; }
+        #console { width: 100%; height: 260px; border: 1px solid #666; padding: 6px; overflow: auto; background: #111; color: #eee; font-size: 12px; white-space: pre-wrap; }
+        .small { font-size: 12px; color: #666; }
+        textarea { width: 260px; height: 60px; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #fff; }
+        .badge-ok { background: #28a745; }
+        .badge-error { background: #dc3545; }
+        table { border-collapse: collapse; margin-top: 8px; width: 100%; font-size: 12px; }
+        th, td { border: 1px solid #ccc; padding: 4px; text-align: left; }
+    </style>
+</head>
+<body>
+<h1>Anime Chat WebSocket & 未读测试页</h1>
+
+<div class="section">
+    <div class="row">
+        <label>HTTP 后端地址</label>
+        <input id="baseUrl" type="text" value="https://localhost:8443">
+        <span class="small">例如：<code>http://localhost:8080</code></span>
+    </div>
+    <div class="row">
+        <label>WS 地址</label>
+        <input id="wsBaseUrl" type="text" value="wss://localhost:8443">
+        <span class="small">与上面协议/端口一致，例如：<code>ws://localhost:8080</code></span>
+    </div>
+    <div class="row small">
+        accessToken: <span id="tokenDisplay">(未登录)</span>
+    </div>
+    <div class="row small">
+        WebSocket 状态:
+        <span id="wsStatus" class="badge badge-error">未连接</span>
+    </div>
+</div>
+
+<!-- 用户登录 -->
+<div class="section">
+    <h2>1. 用户登录 /api/user/login</h2>
+    <div class="row">
+        <label>用户名或邮箱</label>
+        <input id="loginUsername" type="text" value="">
+    </div>
+    <div class="row">
+        <label>密码</label>
+        <input id="loginPassword" type="password" value="">
+        <button onclick="doLogin()">登录</button>
+    </div>
+    <div class="small">
+        成功后会保存 accessToken，并在后续 HTTP 请求带上 <code>Authorization</code>，<br>
+        WebSocket 连接时会通过 <code>?token=accessToken</code> 传给后端。
+    </div>
+</div>
+
+<!-- WebSocket 连接 -->
+<div class="section">
+    <h2>2. WebSocket /ws/chat</h2>
+    <div class="row">
+        <button onclick="connectWs()">连接 WebSocket</button>
+        <button onclick="closeWs()">关闭 WebSocket</button>
+    </div>
+    <div class="small">
+        连接时使用地址：<code>[wsBaseUrl]/ws/chat?token=accessToken</code>
+    </div>
+</div>
+
+<!-- WebSocket 发送消息 -->
+<div class="section">
+    <h2>3. WebSocket 发送消息</h2>
+
+    <h3>3.1 私聊文本消息</h3>
+    <div class="row">
+        <label>好友 userId</label>
+        <input id="pmTargetUserId" type="number">
+    </div>
+    <div class="row">
+        <label>消息内容</label>
+        <textarea id="pmContent"></textarea>
+    </div>
+    <button onclick="sendPrivateText()">发送私聊文本</button>
+
+    <h3>3.2 群聊文本消息</h3>
+    <div class="row">
+        <label>群ID</label>
+        <input id="groupTargetId" type="number">
+    </div>
+    <div class="row">
+        <label>消息内容</label>
+        <textarea id="groupContent"></textarea>
+    </div>
+    <button onclick="sendGroupText()">发送群聊文本</button>
+</div>
+
+<!-- 消息与会话接口测试 -->
+<div class="section">
+    <h2>4. 历史消息 / 未读 / 已读 / 删除 测试</h2>
+
+    <h3>4.1 查看与某好友的历史私聊消息 /api/chat/messages/private</h3>
+    <div class="row">
+        <label>好友 userId</label>
+        <input id="historyFriendId" type="number">
+        <button onclick="loadPrivateHistory()">加载私聊历史</button>
+    </div>
+    <div class="small">
+        下方表格会显示消息ID、发送者、接收者、内容、时间。<br>
+        你可以复制某条的 <code>id</code> 用于删除接口测试。
+    </div>
+    <div id="privateHistoryContainer"></div>
+
+    <h3>4.2 查看某群历史消息 /api/chat/messages/group</h3>
+    <div class="row">
+        <label>群ID</label>
+        <input id="historyGroupId" type="number">
+        <button onclick="loadGroupHistory()">加载群历史</button>
+    </div>
+    <div id="groupHistoryContainer"></div>
+
+    <h3>4.3 将与某好友的私聊消息全部标记为已读 /api/chat/messages/private/markRead</h3>
+    <div class="row">
+        <label>好友 userId</label>
+        <input id="markReadFriendId" type="number">
+        <button onclick="markPrivateRead()">标记为已读</button>
+    </div>
+    <div class="small">
+        调用后可以再次查看会话列表，确认对应会话的 <code>unreadCount</code> 变为 0。
+    </div>
+
+    <h3>4.4 单向删除一条消息 /api/chat/messages/delete</h3>
+    <div class="row">
+        <label>消息ID (chat_messages.id)</label>
+        <input id="deleteMessageId" type="number">
+        <button onclick="deleteMessage()">删除该消息(对自己)</button>
+    </div>
+    <div class="small">
+        删除成功后，再次拉历史消息，会看不到该条消息。其它用户的记录不受影响。
+    </div>
+
+    <h3>4.5 查看会话列表（含 unreadCount） /api/chat/sessions/list</h3>
+    <div class="row">
+        <button onclick="loadSessions()">加载会话列表</button>
+    </div>
+    <div id="sessionsContainer"></div>
+</div>
+
+<!-- 控制台 -->
+<div class="section">
+    <h2>控制台</h2>
+    <div id="console"></div>
+    <button onclick="clearConsole()">清空控制台</button>
+</div>
+
+<script>
+    let accessToken = null;
+    let ws = null;
+
+    function log(msg, obj) {
+        const c = document.getElementById('console');
+        const time = new Date().toISOString();
+        c.textContent += `[${time}] ${msg}\n`;
+        if (obj !== undefined) {
+            try {
+                c.textContent += JSON.stringify(obj, null, 2) + "\n";
+            } catch (e) {
+                c.textContent += String(obj) + "\n";
+            }
+        }
+        c.scrollTop = c.scrollHeight;
+    }
+
+    function clearConsole() {
+        document.getElementById('console').textContent = '';
+    }
+
+    function setToken(token) {
+        accessToken = token;
+        document.getElementById('tokenDisplay').textContent = token ? token : '(未登录)';
+    }
+
+    function setWsStatus(connected) {
+        const el = document.getElementById('wsStatus');
+        if (connected) {
+            el.textContent = '已连接';
+            el.className = 'badge badge-ok';
+        } else {
+            el.textContent = '未连接';
+            el.className = 'badge badge-error';
+        }
+    }
+
+    function getBaseUrl() {
+        return document.getElementById('baseUrl').value.replace(/\/+$/, '');
+    }
+
+    function getWsBaseUrl() {
+        return document.getElementById('wsBaseUrl').value.replace(/\/+$/, '');
+    }
+
+    async function apiPost(path, body) {
+        const url = getBaseUrl() + path;
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) {
+            headers['Authorization'] = 'Bearer ' + accessToken;
+        }
+        log(`HTTP REQUEST POST ${url}`, body);
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: body ? JSON.stringify(body) : '{}',
+            credentials: 'include'
+        });
+
+        const newAccess = resp.headers.get('New-Access-Token');
+        if (newAccess) {
+            setToken(newAccess);
+            log('HTTP: 更新 accessToken (New-Access-Token)', newAccess);
+        }
+
+        let json;
+        try {
+            json = await resp.json();
+        } catch (e) {
+            const text = await resp.text();
+            log(`HTTP RESPONSE ${resp.status} (非 JSON)`, text);
+            throw e;
+        }
+        log(`HTTP RESPONSE ${resp.status}`, json);
+        return { status: resp.status, data: json };
+    }
+
+    // 1. 登录
+    async function doLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+        if (!username || !password) {
+            alert('请输入用户名和密码');
+            return;
+        }3
+
+        // 再清理前端 token 和 WS
+        if (accessToken) {
+            log('清理旧 accessToken');
+        }
+        setToken(null);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            log('登录新用户前，关闭旧的 WebSocket 连接');
+            ws.close();
+        }
+
+        const body = {
+            usernameOrEmail: username,
+            password: password
+        };
+
+        try {
+            const res = await apiPost('/api/user/login', body);
+            if (res.status === 200 && res.data && res.data.isSuccess) {
+                if (!accessToken) {
+                    log('注意: 未从响应头获取 accessToken，请确认后端是否设置 New-Access-Token 头');
+                }
+                alert('登录成功');
+            } else {
+                alert('登录失败，请查看控制台');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('登录请求出错，请查看控制台');
+        }
+    }
+
+    // 2. WebSocket 连接 / 关闭
+    function connectWs() {
+        if (!accessToken) {
+            alert('请先登录，获取 accessToken');
+            return;
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            alert('WebSocket 已连接');
+            return;
+        }
+
+        const wsBase = getWsBaseUrl();
+        const url = wsBase + '/ws/chat?token=' + encodeURIComponent(accessToken);
+        log('WS CONNECT ' + url);
+
+        ws = new WebSocket(url);
+
+        ws.onopen = () => {
+            log('WS onopen');
+            setWsStatus(true);
+        };
+
+        ws.onmessage = (event) => {
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch (e) {
+                log('WS MESSAGE (非 JSON)', event.data);
+                return;
+            }
+            log('WS MESSAGE', data);
+        };
+
+        ws.onclose = (event) => {
+            log('WS onclose', event);
+            setWsStatus(false);
+        };
+
+        ws.onerror = (event) => {
+            log('WS onerror', event);
+        };
+    }
+
+    function closeWs() {
+        if (ws) {
+            log('WS 手动关闭');
+            ws.close();
+        }
+    }
+
+    function sendWsEnvelope(type, payload) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            alert('WebSocket 未连接');
+            return;
+        }
+        const msg = { type, payload };
+        log('WS SEND', msg);
+        ws.send(JSON.stringify(msg));
+    }
+
+    // 3.1 私聊文本
+    function sendPrivateText() {
+        const v = document.getElementById('pmTargetUserId').value.trim();
+        const content = document.getElementById('pmContent').value;
+        if (!v) {
+            alert('请输入好友 userId');
+            return;
+        }
+        if (!content) {
+            alert('请输入消息内容');
+            return;
+        }
+        const targetUserId = Number(v);
+        const payload = {
+            conversationType: 'PRIVATE',
+            targetUserId: targetUserId,
+            groupId: null,
+            messageType: 'TEXT',
+            content: content,
+            attachmentId: null
+        };
+        sendWsEnvelope('SEND_MESSAGE', payload);
+    }
+
+    // 3.2 群聊文本
+    function sendGroupText() {
+        const v = document.getElementById('groupTargetId').value.trim();
+        const content = document.getElementById('groupContent').value;
+        if (!v) {
+            alert('请输入群ID');
+            return;
+        }
+        if (!content) {
+            alert('请输入消息内容');
+            return;
+        }
+        const groupId = Number(v);
+        const payload = {
+            conversationType: 'GROUP',
+            targetUserId: null,
+            groupId: groupId,
+            messageType: 'TEXT',
+            content: content,
+            attachmentId: null
+        };
+        sendWsEnvelope('SEND_MESSAGE', payload);
+    }
+
+    // 4.1 加载与好友的私聊历史
+    async function loadPrivateHistory() {
+        const v = document.getElementById('historyFriendId').value.trim();
+        if (!v) {
+            alert('请输入好友 userId');
+            return;
+        }
+        const friendId = Number(v);
+        const res = await apiPost('/api/chat/messages/private', { friendId });
+        const container = document.getElementById('privateHistoryContainer');
+        container.innerHTML = '';
+        if (!res.data || !res.data.data || !res.data.data.messages) {
+            container.textContent = '无数据';
+            return;
+        }
+        const messages = res.data.data.messages;
+        if (messages.length === 0) {
+            container.textContent = '暂无消息';
+            return;
+        }
+        const table = document.createElement('table');
+        table.innerHTML = `
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>fromUserId</th>
+          <th>toUserId</th>
+          <th>content</th>
+          <th>messageType</th>
+          <th>createdAt</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+        const tbody = table.querySelector('tbody');
+        messages.forEach(m => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+        <td>${m.id}</td>
+        <td>${m.fromUserId}</td>
+        <td>${m.toUserId}</td>
+        <td>${m.content || ''}</td>
+        <td>${m.messageType}</td>
+        <td>${m.createdAt || ''}</td>
+      `;
+            tbody.appendChild(tr);
+        });
+        container.appendChild(table);
+    }
+
+    // 4.2 加载群历史
+    async function loadGroupHistory() {
+        const v = document.getElementById('historyGroupId').value.trim();
+        if (!v) {
+            alert('请输入群ID');
+            return;
+        }
+        const groupId = Number(v);
+        const res = await apiPost('/api/chat/messages/group', { groupId });
+        const container = document.getElementById('groupHistoryContainer');
+        container.innerHTML = '';
+        if (!res.data || !res.data.data || !res.data.data.messages) {
+            container.textContent = '无数据';
+            return;
+        }
+        const messages = res.data.data.messages;
+        if (messages.length === 0) {
+            container.textContent = '暂无消息';
+            return;
+        }
+        const table = document.createElement('table');
+        table.innerHTML = `
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>fromUserId</th>
+          <th>toUserId</th>
+          <th>groupId</th>
+          <th>content</th>
+          <th>messageType</th>
+          <th>createdAt</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+        const tbody = table.querySelector('tbody');
+        messages.forEach(m => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+        <td>${m.id}</td>
+        <td>${m.fromUserId}</td>
+        <td>${m.toUserId}</td>
+        <td>${m.groupId}</td>
+        <td>${m.content || ''}</td>
+        <td>${m.messageType}</td>
+        <td>${m.createdAt || ''}</td>
+      `;
+            tbody.appendChild(tr);
+        });
+        container.appendChild(table);
+    }
+
+    // 4.3 标记私聊为已读
+    async function markPrivateRead() {
+        const v = document.getElementById('markReadFriendId').value.trim();
+        if (!v) {
+            alert('请输入好友 userId');
+            return;
+        }
+        const friendId = Number(v);
+        await apiPost('/api/chat/messages/private/markRead', { friendId });
+    }
+
+    // 4.4 删除消息
+    async function deleteMessage() {
+        const v = document.getElementById('deleteMessageId').value.trim();
+        if (!v) {
+            alert('请输入消息ID');
+            return;
+        }
+        const messageId = Number(v);
+        await apiPost('/api/chat/messages/delete', { messageId });
+    }
+
+    // 4.5 加载会话列表
+    async function loadSessions() {
+        const res = await apiPost('/api/chat/sessions/list', {});
+        const container = document.getElementById('sessionsContainer');
+        container.innerHTML = '';
+        if (!res.data || !res.data.data || !res.data.data.sessions) {
+            container.textContent = '无数据';
+            return;
+        }
+        const sessions = res.data.data.sessions;
+        if (sessions.length === 0) {
+            container.textContent = '暂无会话';
+            return;
+        }
+        const table = document.createElement('table');
+        table.innerHTML = `
+      <thead>
+        <tr>
+          <th>sessionType</th>
+          <th>sessionTargetId</th>
+          <th>title</th>
+          <th>lastMessageTime</th>
+          <th>lastMessagePreview</th>
+          <th>unreadCount</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+        const tbody = table.querySelector('tbody');
+        sessions.forEach(s => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+        <td>${s.sessionType}</td>
+        <td>${s.sessionTargetId}</td>
+        <td>${s.title || ''}</td>
+        <td>${s.lastMessageTime || ''}</td>
+        <td>${s.lastMessagePreview || ''}</td>
+        <td>${s.unreadCount}</td>
+      `;
+            tbody.appendChild(tr);
+        });
+        container.appendChild(table);
+    }
+</script>
+</body>
+</html>

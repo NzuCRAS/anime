@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Anime Chat API 测试页</title>
+    <style>
+        body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin: 20px; }
+        h2 { margin-top: 24px; }
+        .section { border: 1px solid #ccc; padding: 12px; margin-bottom: 16px; border-radius: 4px; }
+        .row { margin-bottom: 6px; }
+        label { display: inline-block; width: 130px; }
+        input[type="text"], input[type="password"] { width: 220px; }
+        button { margin-left: 4px; }
+        #console { width: 100%; height: 260px; border: 1px solid #666; padding: 6px; overflow: auto; background: #111; color: #eee; font-size: 12px; white-space: pre-wrap; }
+        .small { font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+<h1>Anime Chat / User API 测试页</h1>
+
+<div class="section">
+    <div class="row">
+        <label>后端基础地址</label>
+        <input id="baseUrl" type="text" value="https://localhost:8443">
+        <span class="small">例如：<code>http://localhost:8080</code></span>
+    </div>
+    <div class="row small">
+        当前 accessToken: <span id="tokenDisplay">(未登录)</span>
+    </div>
+</div>
+
+<!-- 用户登录 -->
+<div class="section">
+    <h2>1. 用户登录 /api/user/login</h2>
+    <div class="row">
+        <label>用户名或邮箱</label>
+        <input id="loginUsername" type="text" value="">
+    </div>
+    <div class="row">
+        <label>密码</label>
+        <input id="loginPassword" type="password" value="">
+        <button onclick="doLogin()">登录</button>
+    </div>
+    <div class="small">
+        成功后会保存 accessToken，并在下面的请求中自动带上 <code>Authorization: Bearer ...</code>。
+    </div>
+</div>
+
+<!-- 好友相关 -->
+<div class="section">
+    <h2>2. 好友接口</h2>
+
+    <h3>2.1 获取好友列表 /api/chat/friends/list</h3>
+    <button onclick="listFriends()">获取好友列表</button>
+
+    <h3>2.2 添加好友 /api/chat/friends/add</h3>
+    <div class="row">
+        <label>好友 UUID (userId)</label>
+        <input id="friendUid" type="text">
+        <button onclick="addFriend()">添加好友</button>
+    </div>
+
+    <h3>2.3 删除好友 /api/chat/friends/remove</h3>
+    <div class="row">
+        <label>好友 userId</label>
+        <input id="friendIdToRemove" type="text">
+        <button onclick="removeFriend()">删除好友</button>
+    </div>
+</div>
+
+<!-- 群聊相关 -->
+<div class="section">
+    <h2>3. 群聊接口</h2>
+
+    <h3>3.1 创建群聊 /api/chat/groups/create</h3>
+    <div class="row">
+        <label>群名称</label>
+        <input id="groupName" type="text">
+    </div>
+    <div class="row">
+        <label>群简介</label>
+        <input id="groupDesc" type="text">
+    </div>
+    <div class="row">
+        <label>成员 UUID 列表</label>
+        <input id="groupMembers" type="text">
+        <span class="small">逗号分隔的 userId，例如：<code>2,3,4</code></span>
+    </div>
+    <button onclick="createGroup()">创建群聊</button>
+
+    <h3>3.2 我的群聊列表 /api/chat/groups/list</h3>
+    <button onclick="listGroups()">获取我的群聊</button>
+
+    <h3>3.3 群成员列表 /api/chat/groups/members</h3>
+    <div class="row">
+        <label>群ID</label>
+        <input id="membersGroupId" type="text">
+        <button onclick="listGroupMembers()">获取群成员</button>
+    </div>
+</div>
+
+<!-- 会话列表 -->
+<div class="section">
+    <h2>4. 会话列表 /api/chat/sessions/list</h2>
+    <button onclick="listSessions()">获取会话列表</button>
+    <div class="small">
+        返回的 sessions 会包含单聊和群聊，按 lastMessageTime 排序。
+    </div>
+</div>
+
+<!-- 历史消息 -->
+<div class="section">
+    <h2>5. 历史消息接口</h2>
+
+    <h3>5.1 私聊历史 /api/chat/messages/private</h3>
+    <div class="row">
+        <label>好友 userId</label>
+        <input id="pmFriendId" type="text">
+        <button onclick="listPrivateMessages()">获取私聊历史</button>
+    </div>
+
+    <h3>5.2 群聊历史 /api/chat/messages/group</h3>
+    <div class="row">
+        <label>群ID</label>
+        <input id="pmGroupId" type="text">
+        <button onclick="listGroupMessages()">获取群聊历史</button>
+    </div>
+</div>
+
+<!-- 控制台 -->
+<div class="section">
+    <h2>控制台</h2>
+    <div id="console"></div>
+    <button onclick="clearConsole()">清空控制台</button>
+</div>
+
+<script>
+    let accessToken = null;
+
+    function log(msg, obj) {
+        const c = document.getElementById('console');
+        const time = new Date().toISOString();
+        c.textContent += `[${time}] ${msg}\n`;
+        if (obj !== undefined) {
+            c.textContent += JSON.stringify(obj, null, 2) + "\n";
+        }
+        c.scrollTop = c.scrollHeight;
+    }
+
+    function clearConsole() {
+        document.getElementById('console').textContent = '';
+    }
+
+    function setToken(token) {
+        accessToken = token;
+        document.getElementById('tokenDisplay').textContent = token ? token : '(未登录)';
+    }
+
+    function getBaseUrl() {
+        return document.getElementById('baseUrl').value.replace(/\/+$/, '');
+    }
+
+    async function apiPost(path, body) {
+        const url = getBaseUrl() + path;
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) {
+            headers['Authorization'] = 'Bearer ' + accessToken;
+        }
+        log(`REQUEST POST ${url}`, body);
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: body ? JSON.stringify(body) : '{}',
+            credentials: 'include' // 让浏览器带上/接收 cookie（refresh token 用得到）
+        });
+
+        // 读取可能返回的新 accessToken
+        const newAccess = resp.headers.get('New-Access-Token');
+        if (newAccess) {
+            setToken(newAccess);
+            log('更新 accessToken (New-Access-Token 头)', newAccess);
+        }
+
+        let json;
+        try {
+            json = await resp.json();
+        } catch (e) {
+            log(`RESPONSE ${resp.status} (非 JSON)`, await resp.text());
+            throw e;
+        }
+        log(`RESPONSE ${resp.status}`, json);
+        return { status: resp.status, data: json };
+    }
+
+    // 1. 登录
+    async function doLogin() {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+        if (!username || !password) {
+            alert('请输入用户名和密码');
+            return;
+        }
+
+        const body = {
+            usernameOrEmail: username,
+            password: password
+        };
+
+        try {
+            const res = await apiPost('/api/user/login', body);
+            if (res.status === 200 && res.data && res.data.isSuccess) {
+                // 如果后端没有 New-Access-Token，也尝试从 data 中拿
+                const tokenFromHeader = accessToken;
+                if (!tokenFromHeader) {
+                    log('注意：未从响应头获取 accessToken，若需要可在 login 响应中返回');
+                }
+                alert('登录成功');
+            } else {
+                alert('登录失败，请检查控制台');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('登录请求出错');
+        }
+    }
+
+    // 2. 好友接口
+    async function listFriends() {
+        await apiPost('/api/chat/friends/list', {});
+    }
+
+    async function addFriend() {
+        const v = document.getElementById('friendUid').value.trim();
+        if (!v) {
+            alert('请输入好友 UUID (userId)');
+            return;
+        }
+        const friendUid = Number(v);
+        await apiPost('/api/chat/friends/add', { friendUid });
+    }
+
+    async function removeFriend() {
+        const v = document.getElementById('friendIdToRemove').value.trim();
+        if (!v) {
+            alert('请输入好友 userId');
+            return;
+        }
+        const friendId = Number(v);
+        await apiPost('/api/chat/friends/remove', { friendId });
+    }
+
+    // 3. 群聊接口
+    async function createGroup() {
+        const name = document.getElementById('groupName').value.trim();
+        const desc = document.getElementById('groupDesc').value.trim();
+        const membersStr = document.getElementById('groupMembers').value.trim();
+        if (!name) {
+            alert('请输入群名称');
+            return;
+        }
+        let memberUuids = [];
+        if (membersStr) {
+            memberUuids = membersStr.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
+        }
+
+        const body = {
+            name: name,
+            description: desc,
+            memberUuids: memberUuids
+        };
+        await apiPost('/api/chat/groups/create', body);
+    }
+
+    async function listGroups() {
+        await apiPost('/api/chat/groups/list', {});
+    }
+
+    async function listGroupMembers() {
+        const v = document.getElementById('membersGroupId').value.trim();
+        if (!v) {
+            alert('请输入群ID');
+            return;
+        }
+        const groupId = Number(v);
+        await apiPost('/api/chat/groups/members', { groupId });
+    }
+
+    // 4. 会话列表
+    async function listSessions() {
+        await apiPost('/api/chat/sessions/list', {});
+    }
+
+    // 5. 历史消息
+    async function listPrivateMessages() {
+        const v = document.getElementById('pmFriendId').value.trim();
+        if (!v) {
+            alert('请输入好友 userId');
+            return;
+        }
+        const friendId = Number(v);
+        await apiPost('/api/chat/messages/private', { friendId });
+    }
+
+    async function listGroupMessages() {
+        const v = document.getElementById('pmGroupId').value.trim();
+        if (!v) {
+            alert('请输入群ID');
+            return;
+        }
+        const groupId = Number(v);
+        await apiPost('/api/chat/messages/group', { groupId });
+    }
+</script>
+</body>
+</html>

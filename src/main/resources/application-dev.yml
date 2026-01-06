@@ -40,7 +40,7 @@ jwt:
   cookie-secure: true
   cookie-same-site: "None"
   access-token:
-    expiration: 900000       # 15 minutes in ms
+    expiration: 1800000       # 15 minutes in ms
   refresh-token:
     expiration: 604800000   # 7 days in ms
     redis-key-prefix: "refresh:jti:"
