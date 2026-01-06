@@ -87,7 +87,7 @@ public class SecurityConfig {
                         ).permitAll()
 
                         // 其它公开资源
-                        .requestMatchers("/api/user/ping", "/api/attachments/**").permitAll()
+                        .requestMatchers("/api/user/ping","/api/user/ping1", "/api/attachments/**", "/ws/**", "/api/videos/*/hls/playlist").permitAll()
 
                         // 其余都需要认证
                         .anyRequest().authenticated()

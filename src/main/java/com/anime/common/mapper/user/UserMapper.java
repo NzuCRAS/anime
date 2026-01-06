@@ -12,8 +12,6 @@ import org.apache.ibatis.annotations.Update;
 @Mapper
 public interface UserMapper extends BaseMapper<User> {
 
-    // 基础 CRUD 都不需要写，MyBatis-Plus 自动提供
-
     // 只需要写特殊的查询（如果有的话）
     @Select("SELECT * FROM users WHERE username = #{username} OR email = #{email}")
     User findByUsernameOrEmail(String username, String email);
@@ -26,4 +24,7 @@ public interface UserMapper extends BaseMapper<User> {
 
     @Select("SELECT avatar_attachment_id FROM users WHERE id = #{userId}")
     Long getAvatarAttachmentIdById(Long userId);
+
+    @Select("SELECT personal_signature FROM users WHERE id = #{userId}")
+    String getPersonalSignatureById(Long userId);
 }

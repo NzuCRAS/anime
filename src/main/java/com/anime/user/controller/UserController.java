@@ -330,9 +330,15 @@ public class UserController {
         }
     }
 
-    @Operation(summary = "ping", description = "用于心跳/测试 auth（返回 pong）")
+    @Operation(summary = "ping", description = "用于心跳/测试（返回 pong）")
     @PostMapping("/ping")
-    public ResponseEntity<Result<String>> ping(@CurrentUser Long currentUserId) {
+    public ResponseEntity<Result<String>> ping() {
+        return ResponseEntity.ok(Result.success("pong"));
+    }
+
+    @Operation(summary = "ping", description = "用于心跳/测试（返回 pong）")
+    @PostMapping("/ping1")
+    public ResponseEntity<Result<String>> ping1() {
         return ResponseEntity.ok(Result.success("pong"));
     }
 }

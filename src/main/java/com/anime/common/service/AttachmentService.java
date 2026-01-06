@@ -380,6 +380,25 @@ public class AttachmentService {
         return presigned.url().toString();
     }
 
+    public String generatePresignedGetUrlByKey(String storageKey, long expirySeconds) {
+        if (storageKey == null || storageKey.isBlank()) return null;
+        if (cdnDomain != null && !cdnDomain.isBlank()) {
+            return cdnDomain.endsWith("/") ? cdnDomain + storageKey : cdnDomain + "/" + storageKey;
+        }
+        GetObjectRequest getReq = GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(storageKey)
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofSeconds(Math.max(60, expirySeconds)))
+                .getObjectRequest(getReq)
+                .build();
+
+        PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
+        return presigned.url().toString();
+    }
+
     public Attachment getAttachmentById(Long attachmentId) {
         if (attachmentId == null) return null;
         return attachmentMapper.selectById(attachmentId);
