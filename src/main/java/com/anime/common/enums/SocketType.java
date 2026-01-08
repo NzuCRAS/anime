@@ -12,5 +12,5 @@ public enum SocketType {
     NEW_GROUP_MESSAGE,
     GROUP_MESSAGES_READ,
     USER_ONLINE,
-    USER_OFFLINE;
+    USER_OFFLINE
 }
