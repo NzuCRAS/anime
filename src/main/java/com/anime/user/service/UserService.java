@@ -73,7 +73,7 @@ public class UserService {
         if (userId == null) return;
         try {
             // userMapper.updateLastLogin 期望参数为 String 或 Long，根据你的 mapper 定义调整
-            userMapper.updateLastLogin(String.valueOf(userId));
+            userMapper.updateLastLogin(userId);
         } catch (Exception e) {
             log.debug("更新 last_login 失败: {}", e.getMessage());
         }
@@ -93,12 +93,24 @@ public class UserService {
     public Long authenticateAndGetId(String usernameOrEmail, String password) {
         if (usernameOrEmail == null || password == null) return null;
         try {
+            log.debug("authenticateAndGetId: attempt login for identifier='{}'", usernameOrEmail);
             User u = userMapper.findByUsernameOrEmail(usernameOrEmail, usernameOrEmail);
-            if (u == null) return null;
-            String storedHash = u.getPassword(); // 请确认 User 实体的字段名
-            if (storedHash == null) return null;
+            if (u == null) {
+                log.debug("authenticateAndGetId: user not found for '{}'", usernameOrEmail);
+                return null;
+            }
+            String storedHash = u.getPassword();
+            if (storedHash == null) {
+                log.debug("authenticateAndGetId: user '{}' has no stored password", usernameOrEmail);
+                return null;
+            }
             boolean ok = passwordEncoder.matches(password, storedHash);
-            return ok ? u.getId() : null;
+            if (!ok) {
+                log.debug("authenticateAndGetId: password mismatch for user '{}'", usernameOrEmail);
+                return null;
+            }
+            log.debug("authenticateAndGetId: login success for userId={}", u.getId());
+            return u.getId();
         } catch (Exception e) {
             log.debug("authenticateAndGetId failed: {}", e.getMessage());
             return null;

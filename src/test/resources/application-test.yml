@@ -23,9 +23,9 @@ spring:
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.redis. RedisAutoConfiguration
-      - org. springframework.boot.docker.compose. core.DockerComposeAutoConfiguration
-      - org.springframework.boot.autoconfigure.security.servlet. SecurityAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.docker.compose.core.DockerComposeAutoConfiguration
+      - org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration
       - org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration
 
 # 禁用Actuator（如果不需要监控端点）

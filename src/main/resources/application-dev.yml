@@ -48,11 +48,7 @@ jwt:
 
 cors:
   allowed-origins:
-    - "http://localhost:3000"
-    - "http://localhost:5173"
-    - "https://localhost:5173"
-    - "http://localhost:63342"
-    - "https://localhost:8443"
+    - "*"
   exposed-headers:
     - "New-Access-Token"
   allow-credentials: true

@@ -13,6 +13,12 @@ public class ChatMessage {
     private Long id;
 
     /**
+     * 客户端幂等 ID（由客户端生成，允许为空）
+     * 用于同一发送者对同一逻辑消息的去重（from_user_id + client_message_id 唯一）
+     */
+    private String clientMessageId;
+
+    /**
      * 逻辑消息ID：
      * - 同一条逻辑消息对多个接收者的多条记录共用一个值
      * - 一般设为“第一条插入记录的 id”

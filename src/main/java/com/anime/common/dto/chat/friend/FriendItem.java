@@ -19,9 +19,9 @@ public class FriendItem {
     private String username;
 
     /**
-     * 邮箱
+     * 个性签名
      */
-    private String email;
+    private String personalSignature;
 
     /**
      * 好友头像 URL

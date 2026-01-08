@@ -1,6 +1,8 @@
 package com.anime.chat.service;
 
+import com.anime.chat.socket.WsEventPublisher;
 import com.anime.common.dto.chat.friend.*;
+import com.anime.common.dto.chat.session.SessionItem;
 import com.anime.common.entity.chat.UserFriend;
 import com.anime.common.entity.chat.UserFriendRequest;
 import com.anime.common.entity.user.User;
@@ -11,6 +13,7 @@ import com.anime.common.service.AttachmentService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +23,7 @@ import java.util.stream.Collectors;
 /**
  * 好友相关业务逻辑
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
@@ -27,6 +31,7 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
     private final UserMapper userMapper;
     private final AttachmentService attachmentService;
     private final UserFriendRequestMapper userFriendRequestMapper;
+    private final WsEventPublisher wsEventPublisher;
 
     @Transactional
     public AddFriendResponse addFriend(AddFriendRequest request, Long currentUserId) {
@@ -99,7 +104,7 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
             FriendItem item = new FriendItem();
             item.setId(u.getId());
             item.setUsername(u.getUsername());
-            item.setEmail(u.getEmail());
+            item.setPersonalSignature(u.getPersonalSignature());
             Long avatarAttId = userMapper.getAvatarAttachmentIdById(u.getId());
             if (avatarAttId != null) {
                 item.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarAttId, 3600));
@@ -145,7 +150,7 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         if (existing != null) {
             SendFriendRequestResponse r = new SendFriendRequestResponse();
             r.setRequestId(existing.getId());
-            r.setStatus("pending");
+            r.setStatus("already pending");
             return r;
         }
 
@@ -156,6 +161,8 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         fr.setMessage(message);
         fr.setStatus("pending");
         userFriendRequestMapper.insert(fr);
+
+        notifyNewFriendRequest(currentUserId, req);
 
         SendFriendRequestResponse r = new SendFriendRequestResponse();
         r.setRequestId(fr.getId());
@@ -202,6 +209,9 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         String action = req.getAction();
         if (action == null) throw new IllegalArgumentException("action required");
 
+        // 向好友申请发送方推送消息
+        notifyFriendResponse(fr.getFromUserId(), req);
+
         if ("accept".equalsIgnoreCase(action)) {
             // create friendship if not exists
             long c1 = this.count(Wrappers.<UserFriend>lambdaQuery()
@@ -227,15 +237,15 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
     }
 
     /**
-     * 精确用户名搜索（严格匹配）
+     * 精确id搜索（严格匹配）
      */
-    public SearchUserResponse searchByUsername(SearchUserRequest req) {
-        if (req == null || req.getUsername() == null || req.getUsername().isBlank()) {
+    public SearchUserResponse searchById(SearchUserRequest req) {
+        if (req == null || req.getUserId() == null || req.getUserId() <= 0) {
             SearchUserResponse r = new SearchUserResponse();
             r.setItems(List.of());
             return r;
         }
-        User u = userMapper.findByUsernameOrEmail(req.getUsername(), null);
+        User u = userMapper.findById(req.getUserId());
         SearchUserResponse resp = new SearchUserResponse();
         if (u == null) {
             resp.setItems(List.of());
@@ -271,5 +281,29 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
                 .eq(UserFriend::getFriendId, currentUserId));
 
         return true;
+    }
+
+    /**
+     * 通过socket实时发送好友申请
+     */
+    private void notifyNewFriendRequest(Long userId, SendFriendRequestRequest req) {
+        try {
+            wsEventPublisher.sendToUser(userId, "NEW_FRIEND_REQUEST", req);
+        } catch (Exception e) {
+            log.warn("send friend request failed, userId={}, req={}, err={}",
+                    userId, req, e.getMessage());
+        }
+    }
+
+    /**
+     * 会话因“消息变化”（新消息、删除等）导致更新
+     */
+    private void notifyFriendResponse(Long userId, HandleFriendRequestRequest req) {
+        try {
+            wsEventPublisher.sendToUser(userId, "FRIEND_REQUEST_RESPONSE", req);
+        } catch (Exception e) {
+            log.warn("receive friend response failed, userId={}, req={}, err={}",
+                    userId, req, e.getMessage());
+        }
     }
 }

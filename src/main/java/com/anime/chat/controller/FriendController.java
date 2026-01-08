@@ -89,12 +89,12 @@ public class FriendController {
     }
 
     /**
-     * 精确用户名搜索好友（严格匹配）
+     * 精确id搜索好友（严格匹配）
      */
     @PostMapping("/search")
     public Result<SearchUserResponse> searchUser(@RequestBody SearchUserRequest req) {
         try {
-            SearchUserResponse resp = friendService.searchByUsername(req);
+            SearchUserResponse resp = friendService.searchById(req);
             return Result.success(resp);
         } catch (Exception e) {
             log.error("searchUser error", e);

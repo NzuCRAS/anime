@@ -1,315 +1,387 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>Anime Chat API 测试页</title>
+    <meta charset="utf-8" />
+    <title>Anime Chat 自动化 WS 测试</title>
     <style>
-        body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin: 20px; }
-        h2 { margin-top: 24px; }
-        .section { border: 1px solid #ccc; padding: 12px; margin-bottom: 16px; border-radius: 4px; }
-        .row { margin-bottom: 6px; }
-        label { display: inline-block; width: 130px; }
-        input[type="text"], input[type="password"] { width: 220px; }
-        button { margin-left: 4px; }
-        #console { width: 100%; height: 260px; border: 1px solid #666; padding: 6px; overflow: auto; background: #111; color: #eee; font-size: 12px; white-space: pre-wrap; }
-        .small { font-size: 12px; color: #666; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 16px; }
+        .box { border: 1px solid #ccc; padding: 12px; margin-bottom: 12px; border-radius: 6px; }
+        label { display:inline-block; width:140px; vertical-align: middle; }
+        input[type=text], input[type=password], input[type=number], textarea { width:300px; }
+        textarea { height:80px; }
+        #console { background:#111; color:#e6e6e6; padding:8px; height:320px; overflow:auto; font-family: monospace; white-space:pre-wrap; }
+        .evt { padding:4px; margin:6px 0; border-radius:4px; }
+        .evt-new { background:#0b3; color:#012; }
+        .evt-read { background:#39f; color:#032; }
+        .evt-misc { background:#666; color:#fff; }
+        .pass { color:#0a0; font-weight:bold; }
+        .fail { color:#c00; font-weight:bold; }
+        button { margin-left:6px; }
     </style>
 </head>
 <body>
-<h1>Anime Chat / User API 测试页</h1>
+<h2>Anime Chat — WebSocket 自动化测试页</h2>
 
-<div class="section">
-    <div class="row">
-        <label>后端基础地址</label>
-        <input id="baseUrl" type="text" value="https://localhost:8443">
-        <span class="small">例如：<code>http://localhost:8080</code></span>
-    </div>
-    <div class="row small">
-        当前 accessToken: <span id="tokenDisplay">(未登录)</span>
-    </div>
-</div>
-
-<!-- 用户登录 -->
-<div class="section">
-    <h2>1. 用户登录 /api/user/login</h2>
-    <div class="row">
-        <label>用户名或邮箱</label>
-        <input id="loginUsername" type="text" value="">
-    </div>
-    <div class="row">
-        <label>密码</label>
-        <input id="loginPassword" type="password" value="">
-        <button onclick="doLogin()">登录</button>
-    </div>
-    <div class="small">
-        成功后会保存 accessToken，并在下面的请求中自动带上 <code>Authorization: Bearer ...</code>。
+<div class="box">
+    <div><label>HTTP 后端地址</label><input id="baseUrl" value="https://localhost:8443" /></div>
+    <div><label>WS 后端地址</label><input id="wsBaseUrl" value="wss://localhost:8443" /></div>
+    <div style="margin-top:8px;">
+        accessToken: <span id="tokenDisplay">(未登录)</span>
+        &nbsp;&nbsp; WS 状态: <span id="wsStatus">未连接</span>
+        &nbsp;&nbsp; 当前用户ID: <span id="currentUserId">-</span>
     </div>
 </div>
 
-<!-- 好友相关 -->
-<div class="section">
-    <h2>2. 好友接口</h2>
-
-    <h3>2.1 获取好友列表 /api/chat/friends/list</h3>
-    <button onclick="listFriends()">获取好友列表</button>
-
-    <h3>2.2 添加好友 /api/chat/friends/add</h3>
-    <div class="row">
-        <label>好友 UUID (userId)</label>
-        <input id="friendUid" type="text">
-        <button onclick="addFriend()">添加好友</button>
+<div class="box">
+    <h3>1. 登录 / 登出</h3>
+    <div><label>用户名或邮箱</label><input id="loginUsername" /></div>
+    <div><label>密码</label><input id="loginPassword" type="password" /></div>
+    <div style="margin-top:8px;">
+        <button id="btnLogin">登录</button>
+        <button id="btnLogout">登出</button>
+        <button id="btnShowHeaders">显示最近响应头</button>
+        <span id="loginInfo"></span>
     </div>
+    <div class="small">成功后会从响应头读取 <code>New-Access-Token</code> 并保存到前端（请确保后端在 CORS 中暴露此 header）。</div>
+</div>
 
-    <h3>2.3 删除好友 /api/chat/friends/remove</h3>
-    <div class="row">
-        <label>好友 userId</label>
-        <input id="friendIdToRemove" type="text">
-        <button onclick="removeFriend()">删除好友</button>
+<div class="box">
+    <h3>2. WebSocket</h3>
+    <div><button id="btnConnect">连接 WebSocket</button><button id="btnDisconnect">断开 WS</button></div>
+    <div style="margin-top:8px;">
+        <label>自动测试目标 userId</label><input id="autoTargetUserId" type="number" placeholder="对方 userId for private test" />
     </div>
 </div>
 
-<!-- 群聊相关 -->
-<div class="section">
-    <h2>3. 群聊接口</h2>
+<div class="box">
+    <h3>3. 发送 / 操作</h3>
 
-    <h3>3.1 创建群聊 /api/chat/groups/create</h3>
-    <div class="row">
-        <label>群名称</label>
-        <input id="groupName" type="text">
+    <div style="margin-bottom:8px;">
+        <strong>私聊发送</strong><br/>
+        <label>目标 userId</label><input id="pmTargetUserId" type="number" />&nbsp;
+        <label>内容</label><input id="pmContent" value="hi from auto test" />
+        <button id="btnSendPrivate">发送私聊</button>
     </div>
-    <div class="row">
-        <label>群简介</label>
-        <input id="groupDesc" type="text">
-    </div>
-    <div class="row">
-        <label>成员 UUID 列表</label>
-        <input id="groupMembers" type="text">
-        <span class="small">逗号分隔的 userId，例如：<code>2,3,4</code></span>
-    </div>
-    <button onclick="createGroup()">创建群聊</button>
 
-    <h3>3.2 我的群聊列表 /api/chat/groups/list</h3>
-    <button onclick="listGroups()">获取我的群聊</button>
-
-    <h3>3.3 群成员列表 /api/chat/groups/members</h3>
-    <div class="row">
-        <label>群ID</label>
-        <input id="membersGroupId" type="text">
-        <button onclick="listGroupMembers()">获取群成员</button>
+    <div style="margin-bottom:8px;">
+        <strong>群聊发送</strong><br/>
+        <label>群ID</label><input id="groupTargetId" type="number" />&nbsp;
+        <label>内容</label><input id="groupContent" value="group hello" />
+        <button id="btnSendGroup">发送群聊</button>
     </div>
-</div>
 
-<!-- 会话列表 -->
-<div class="section">
-    <h2>4. 会话列表 /api/chat/sessions/list</h2>
-    <button onclick="listSessions()">获取会话列表</button>
-    <div class="small">
-        返回的 sessions 会包含单聊和群聊，按 lastMessageTime 排序。
+    <div style="margin-bottom:8px;">
+        <strong>已读 / 会话</strong><br/>
+        <label>标记私聊已读 (friendId)</label><input id="markReadFriendId" type="number" /> <button id="btnMarkPrivateRead">标记私聊已读</button>
+        &nbsp;&nbsp;
+        <label>标记群已读 (groupId)</label><input id="markReadGroupId" type="number" /> <button id="btnMarkGroupRead">标记群已读</button>
+    </div>
+
+    <div style="margin-top:8px;">
+        <strong>自动化测试（需要另一窗口协同）</strong><br/>
+        <button id="btnAutoPrivate">私聊自动测试（发送端）</button>
+        <button id="btnAutoGroup">群聊自动测试（发送端）</button>
+        <button id="btnAutoRead">已读自动测试（接收端执行标记已读）</button>
+        <div class="small">说明：私聊/群聊自动测试在发送端会发送消息并等待本端收到 NEW_MESSAGE & SESSION_*；已读自动测试用于验证接收端 markRead 后发送端收到 MESSAGES_READ（需另一端配合）。</div>
     </div>
 </div>
 
-<!-- 历史消息 -->
-<div class="section">
-    <h2>5. 历史消息接口</h2>
-
-    <h3>5.1 私聊历史 /api/chat/messages/private</h3>
-    <div class="row">
-        <label>好友 userId</label>
-        <input id="pmFriendId" type="text">
-        <button onclick="listPrivateMessages()">获取私聊历史</button>
-    </div>
-
-    <h3>5.2 群聊历史 /api/chat/messages/group</h3>
-    <div class="row">
-        <label>群ID</label>
-        <input id="pmGroupId" type="text">
-        <button onclick="listGroupMessages()">获取群聊历史</button>
-    </div>
-</div>
-
-<!-- 控制台 -->
-<div class="section">
-    <h2>控制台</h2>
+<div class="box">
+    <h3>4. 控制台 / 事件</h3>
     <div id="console"></div>
-    <button onclick="clearConsole()">清空控制台</button>
+    <div style="margin-top:8px;">
+        <button id="btnClear">清空</button>
+    </div>
 </div>
 
 <script>
-    let accessToken = null;
+    // --------------- 简单工具 ---------------
+    const el = id => document.getElementById(id);
+    const consoleEl = el('console');
+    let lastResponseHeaders = null;
 
     function log(msg, obj) {
-        const c = document.getElementById('console');
-        const time = new Date().toISOString();
-        c.textContent += `[${time}] ${msg}\n`;
+        const t = new Date().toISOString().slice(11,23);
+        consoleEl.textContent += `[${t}] ${msg}\n`;
         if (obj !== undefined) {
-            c.textContent += JSON.stringify(obj, null, 2) + "\n";
+            try { consoleEl.textContent += JSON.stringify(obj,null,2) + "\n"; }
+            catch(e) { consoleEl.textContent += String(obj) + "\n"; }
         }
-        c.scrollTop = c.scrollHeight;
+        consoleEl.scrollTop = consoleEl.scrollHeight;
     }
 
-    function clearConsole() {
-        document.getElementById('console').textContent = '';
+    function notice(msg, ok) {
+        const span = document.createElement('div');
+        span.textContent = msg;
+        span.style.fontWeight = 'bold';
+        span.style.color = ok ? '#0a0' : '#c00';
+        consoleEl.appendChild(span);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
     }
 
-    function setToken(token) {
-        accessToken = token;
-        document.getElementById('tokenDisplay').textContent = token ? token : '(未登录)';
+    function setToken(v) {
+        window.accessToken = v;
+        el('tokenDisplay').textContent = v ? v : '(未登录)';
+    }
+    function setWsStatus(connected) {
+        el('wsStatus').textContent = connected ? '已连接' : '未连接';
+    }
+    function setCurrentUserId(id) {
+        el('currentUserId').textContent = id ? id : '-';
     }
 
-    function getBaseUrl() {
-        return document.getElementById('baseUrl').value.replace(/\/+$/, '');
-    }
-
+    // --------------- HTTP helper ---------------
     async function apiPost(path, body) {
-        const url = getBaseUrl() + path;
+        const url = (el('baseUrl').value.replace(/\/+$/,'') || '') + path;
         const headers = { 'Content-Type': 'application/json' };
-        if (accessToken) {
-            headers['Authorization'] = 'Bearer ' + accessToken;
-        }
-        log(`REQUEST POST ${url}`, body);
+        if (window.accessToken) headers['Authorization'] = 'Bearer ' + window.accessToken;
+        log(`HTTP POST ${url}`, body);
         const resp = await fetch(url, {
             method: 'POST',
             headers,
             body: body ? JSON.stringify(body) : '{}',
-            credentials: 'include' // 让浏览器带上/接收 cookie（refresh token 用得到）
+            credentials: 'include'
         });
-
-        // 读取可能返回的新 accessToken
+        // capture headers
         const newAccess = resp.headers.get('New-Access-Token');
+        lastResponseHeaders = {};
+        resp.headers.forEach((v,k) => lastResponseHeaders[k] = v);
         if (newAccess) {
             setToken(newAccess);
-            log('更新 accessToken (New-Access-Token 头)', newAccess);
+            log('HTTP: New-Access-Token captured', newAccess);
         }
-
-        let json;
-        try {
-            json = await resp.json();
-        } catch (e) {
-            log(`RESPONSE ${resp.status} (非 JSON)`, await resp.text());
-            throw e;
-        }
-        log(`RESPONSE ${resp.status}`, json);
-        return { status: resp.status, data: json };
+        let data = null;
+        try { data = await resp.json(); } catch(e) { data = await resp.text().catch(()=>null); }
+        log(`HTTP ${resp.status}`, data);
+        return { status: resp.status, data, headers: lastResponseHeaders };
     }
 
-    // 1. 登录
-    async function doLogin() {
-        const username = document.getElementById('loginUsername').value.trim();
-        const password = document.getElementById('loginPassword').value.trim();
-        if (!username || !password) {
-            alert('请输入用户名和密码');
+    // --------------- Logout (clear server refresh cookie + local state) ---------------
+    async function doLogout() {
+        try {
+            log('调用后端登出 /api/user/logout');
+            // apiPost 会带上 credentials: 'include'，用于带上 refresh cookie
+            const res = await apiPost('/api/user/logout', {});
+            log('logout response', res);
+        } catch (e) {
+            log('logout 异常', e);
+        }
+        // 清理本地状态
+        setToken(null);
+        setCurrentUserId(null);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.close(); } catch(e){/*ignore*/ }
+        }
+        lastResponseHeaders = null;
+        el('loginInfo').textContent = '';
+        log('本地已清理登录状态');
+    }
+
+    // --------------- WebSocket / Event handling ---------------
+    let ws = null;
+    let pendingAssertions = [];
+
+    function connectWs() {
+        if (!window.accessToken) {
+            alert('请先登录并确保 accessToken 已显示（New-Access-Token header 已被前端读取）');
             return;
         }
-
-        const body = {
-            usernameOrEmail: username,
-            password: password
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            alert('WS 已连接');
+            return;
+        }
+        const base = el('wsBaseUrl').value.replace(/\/+$/,'');
+        const url = base + '/ws/chat?token=' + encodeURIComponent(window.accessToken);
+        log('WS CONNECT ' + url);
+        ws = new WebSocket(url);
+        ws.onopen = () => { log('WS onopen'); setWsStatus(true); };
+        ws.onclose = e => { log('WS onclose ' + (e.code||'') + ' ' + (e.reason||'')); setWsStatus(false); };
+        ws.onerror = e => { log('WS onerror', e); };
+        ws.onmessage = ev => {
+            let payload;
+            try { payload = JSON.parse(ev.data); } catch(e) { log('WS 非 JSON', ev.data); return; }
+            handleEvent(payload);
         };
+    }
 
-        try {
-            const res = await apiPost('/api/user/login', body);
-            if (res.status === 200 && res.data && res.data.isSuccess) {
-                // 如果后端没有 New-Access-Token，也尝试从 data 中拿
-                const tokenFromHeader = accessToken;
-                if (!tokenFromHeader) {
-                    log('注意：未从响应头获取 accessToken，若需要可在 login 响应中返回');
+    function disconnectWs() {
+        if (ws) ws.close();
+    }
+
+    function sendEnvelope(type, payload) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) { alert('WS 未连接'); return; }
+        const env = { type, payload };
+        log('WS SEND ' + type, payload);
+        ws.send(JSON.stringify(env));
+    }
+
+    function handleEvent(env) {
+        // env expected { type: string, payload: any }
+        const type = env.type || '(no-type)';
+        log('WS RECV ' + type, env.payload);
+        // UI highlight
+        const d = document.createElement('div');
+        d.className = 'evt';
+        if (/NEW_MESSAGE|SESSION_MESSAGE_UPDATED|GROUP_SESSION_NEW_MESSAGE/i.test(type)) d.classList.add('evt-new');
+        else if (/READ|MESSAGES_READ|SESSION_READ_UPDATED|GROUP_SESSION_READ|MESSAGE_READ/i.test(type)) d.classList.add('evt-read');
+        else d.classList.add('evt-misc');
+        d.textContent = `${type} ${JSON.stringify(env.payload)}`;
+        consoleEl.appendChild(d);
+
+        // If event is from login flow (some backends may return user info via WS), update currentUserId if present
+        if (env.payload && env.payload.userId) {
+            setCurrentUserId(env.payload.userId);
+        }
+
+        // process pending assertions: each assertion is { id, type, matcher(payload), resolve, reject, timeoutId }
+        for (let i = pendingAssertions.length-1; i >=0; i--) {
+            const a = pendingAssertions[i];
+            try {
+                if (a.type === null || a.type === type) {
+                    if (!a.matcher || a.matcher(env.payload)) {
+                        clearTimeout(a.timeoutId);
+                        a.resolve({ success:true, type, payload: env.payload });
+                        pendingAssertions.splice(i,1);
+                    }
                 }
-                alert('登录成功');
-            } else {
-                alert('登录失败，请检查控制台');
+            } catch(e) {
+                // ignore matcher error
             }
-        } catch (e) {
-            console.error(e);
-            alert('登录请求出错');
         }
     }
 
-    // 2. 好友接口
-    async function listFriends() {
-        await apiPost('/api/chat/friends/list', {});
+    function waitForEvent(expectType, matcher, timeoutMs=5000) {
+        return new Promise((resolve, reject) => {
+            const id = Math.random().toString(36).slice(2,9);
+            const timeoutId = setTimeout(()=> {
+                // remove pending
+                const idx = pendingAssertions.findIndex(x => x.id===id);
+                if (idx>=0) pendingAssertions.splice(idx,1);
+                reject(new Error('timeout waiting for ' + expectType));
+            }, timeoutMs);
+            pendingAssertions.push({ id, type: expectType, matcher, resolve, reject, timeoutId });
+        });
     }
 
-    async function addFriend() {
-        const v = document.getElementById('friendUid').value.trim();
-        if (!v) {
-            alert('请输入好友 UUID (userId)');
-            return;
+    // --------------- Actions binding ---------------
+    el('btnLogin').onclick = async () => {
+        const user = el('loginUsername').value.trim();
+        const pass = el('loginPassword').value.trim();
+        if (!user || !pass) { alert('请输入'); return; }
+
+        // ensure previous session cleared on server/client
+        await doLogout();
+
+        try {
+            const r = await apiPost('/api/user/login', { usernameOrEmail: user, password: pass });
+            if (r.status === 200 && r.data && r.data.isSuccess) {
+                const u = r.data.data;
+                el('loginInfo').textContent = `userId=${u && u.id ? u.id : 'unknown'} username=${u && u.username ? u.username : '-'}`;
+                if (!window.accessToken) log('注意：accessToken 为空，检查响应头 New-Access-Token 是否被暴露到前端（CORS exposed headers）');
+                else log('accessToken 已设置（登录）');
+                setCurrentUserId(u && u.id ? u.id : null);
+            } else {
+                alert('登录失败，查看控制台');
+            }
+        } catch(e) {
+            log('登录异常', e);
+            alert('登录异常，查看控制台');
         }
-        const friendUid = Number(v);
-        await apiPost('/api/chat/friends/add', { friendUid });
-    }
+    };
 
-    async function removeFriend() {
-        const v = document.getElementById('friendIdToRemove').value.trim();
-        if (!v) {
-            alert('请输入好友 userId');
-            return;
+    el('btnLogout').onclick = doLogout;
+
+    el('btnShowHeaders').onclick = () => {
+        log('最近响应头', lastResponseHeaders);
+    };
+
+    el('btnConnect').onclick = connectWs;
+    el('btnDisconnect').onclick = disconnectWs;
+    el('btnClear').onclick = () => { consoleEl.textContent = ''; };
+
+    el('btnSendPrivate').onclick = () => {
+        const target = Number(el('pmTargetUserId').value);
+        const content = el('pmContent').value;
+        if (!target || !content) { alert('请填写目标和内容'); return; }
+        const payload = { clientMessageId: crypto && crypto.randomUUID ? crypto.randomUUID() : ('c-'+Date.now()), conversationType:'PRIVATE', targetUserId: target, messageType:'TEXT', content, attachmentId:null };
+        sendEnvelope('SEND_MESSAGE', payload);
+    };
+
+    el('btnSendGroup').onclick = () => {
+        const groupId = Number(el('groupTargetId').value);
+        const content = el('groupContent').value;
+        if (!groupId || !content) { alert('请填写群ID和内容'); return; }
+        const payload = { clientMessageId: crypto && crypto.randomUUID ? crypto.randomUUID() : ('c-'+Date.now()), conversationType:'GROUP', groupId, messageType:'TEXT', content, attachmentId:null };
+        sendEnvelope('SEND_MESSAGE', payload);
+    };
+
+    el('btnMarkPrivateRead').onclick = async () => {
+        const fid = Number(el('markReadFriendId').value);
+        if (!fid) { alert('friendId 必填'); return; }
+        await apiPost('/api/chat/messages/private/markRead', { friendId: fid });
+        log('调用 markPrivateRead done');
+    };
+
+    el('btnMarkGroupRead').onclick = async () => {
+        const gid = Number(el('markReadGroupId').value);
+        if (!gid) { alert('groupId 必填'); return; }
+        await apiPost('/api/chat/messages/group/markRead', { groupId: gid });
+        log('调用 markGroupRead done');
+    };
+
+    // --------------- Automated test flows ---------------
+
+    // Private auto test (sender side) — expects sender to receive NEW_MESSAGE & SESSION update locally
+    el('btnAutoPrivate').onclick = async () => {
+        const target = Number(el('autoTargetUserId').value);
+        if (!target) { alert('请填写自动测试目标 userId'); return; }
+        const clientId = crypto && crypto.randomUUID ? crypto.randomUUID() : ('c-'+Date.now());
+        const payload = { clientMessageId: clientId, conversationType:'PRIVATE', targetUserId: target, messageType:'TEXT', content:'auto private test ' + Date.now(), attachmentId:null };
+        // prepare expectations: local should receive NEW_MESSAGE (message body) and SESSION_* (session update)
+        const p1 = waitForEvent('NEW_MESSAGE', (pl)=> (pl && pl.clientMessageId===clientId), 5000).catch(()=>null);
+        const p2 = waitForEvent(null, (pl)=> { return true; }, 5000).catch(()=>null);
+        sendEnvelope('SEND_MESSAGE', payload);
+        const r1 = await p1;
+        const r2 = await p2;
+        if (r1) notice('私聊自动测试：收到 NEW_MESSAGE ✔', true); else notice('私聊自动测试：未收到 NEW_MESSAGE ✖', false);
+        if (r2) notice('私聊自动测试：收到会话快照/更新 ✔', true); else notice('私聊自动测试：未收到会话快照/更新 ✖', false);
+    };
+
+    // Group auto test (sender side) — expects local NEW_MESSAGE and GROUP_SESSION_NEW_MESSAGE
+    el('btnAutoGroup').onclick = async () => {
+        const groupId = Number(el('autoTargetUserId').value);
+        if (!groupId) { alert('请填写自动测试目标群ID'); return; }
+        const clientId = crypto && crypto.randomUUID ? crypto.randomUUID() : ('c-'+Date.now());
+        const payload = { clientMessageId: clientId, conversationType:'GROUP', groupId: groupId, messageType:'TEXT', content:'auto group test ' + Date.now(), attachmentId:null };
+        const p1 = waitForEvent('NEW_MESSAGE', (pl)=> (pl && pl.clientMessageId===clientId), 5000).catch(()=>null);
+        const p2 = waitForEvent('GROUP_SESSION_NEW_MESSAGE', (pl)=> pl && pl.sessionTargetId==groupId, 5000).catch(()=>null);
+        sendEnvelope('SEND_MESSAGE', payload);
+        const r1 = await p1;
+        const r2 = await p2;
+        if (r1) notice('群聊自动测试：收到 NEW_MESSAGE ✔', true); else notice('群聊自动测试：未收到 NEW_MESSAGE ✖', false);
+        if (r2) notice('群聊自动测试：收到 GROUP_SESSION_NEW_MESSAGE ✔', true); else notice('群聊自动测试：未收到 GROUP_SESSION_NEW_MESSAGE ✖', false);
+    };
+
+    // Auto-read test: receiver should call markPrivateRead, sender expects MESSAGES_READ
+    el('btnAutoRead').onclick = async () => {
+        const friendId = Number(el('autoTargetUserId').value);
+        if (!friendId) { alert('请填写对方 userId（作为标记已读的目标）'); return; }
+        await apiPost('/api/chat/messages/private/markRead', { friendId });
+        notice('已调用 markPrivateRead', true);
+        // Optionally wait for incoming MESSAGES_READ locally
+        try {
+            const r = await waitForEvent('MESSAGES_READ', (pl)=> pl && (Number(pl.readerId) === friendId || Number(pl.readerId) === Number(friendId)), 5000);
+            if (r) notice('收到 MESSAGES_READ ✔', true);
+        } catch(e) {
+            notice('未收到本端 MESSAGES_READ（如果你是接收端则正常；如果你是发送端，请在发送端窗口等待）', false);
         }
-        const friendId = Number(v);
-        await apiPost('/api/chat/friends/remove', { friendId });
-    }
+    };
 
-    // 3. 群聊接口
-    async function createGroup() {
-        const name = document.getElementById('groupName').value.trim();
-        const desc = document.getElementById('groupDesc').value.trim();
-        const membersStr = document.getElementById('groupMembers').value.trim();
-        if (!name) {
-            alert('请输入群名称');
-            return;
-        }
-        let memberUuids = [];
-        if (membersStr) {
-            memberUuids = membersStr.split(',').map(s => Number(s.trim())).filter(n => !Number.isNaN(n));
-        }
-
-        const body = {
-            name: name,
-            description: desc,
-            memberUuids: memberUuids
-        };
-        await apiPost('/api/chat/groups/create', body);
-    }
-
-    async function listGroups() {
-        await apiPost('/api/chat/groups/list', {});
-    }
-
-    async function listGroupMembers() {
-        const v = document.getElementById('membersGroupId').value.trim();
-        if (!v) {
-            alert('请输入群ID');
-            return;
-        }
-        const groupId = Number(v);
-        await apiPost('/api/chat/groups/members', { groupId });
-    }
-
-    // 4. 会话列表
-    async function listSessions() {
-        await apiPost('/api/chat/sessions/list', {});
-    }
-
-    // 5. 历史消息
-    async function listPrivateMessages() {
-        const v = document.getElementById('pmFriendId').value.trim();
-        if (!v) {
-            alert('请输入好友 userId');
-            return;
-        }
-        const friendId = Number(v);
-        await apiPost('/api/chat/messages/private', { friendId });
-    }
-
-    async function listGroupMessages() {
-        const v = document.getElementById('pmGroupId').value.trim();
-        if (!v) {
-            alert('请输入群ID');
-            return;
-        }
-        const groupId = Number(v);
-        await apiPost('/api/chat/messages/group', { groupId });
-    }
+    // --------------- Init ---------------
+    el('btnClear').onclick = ()=> { consoleEl.textContent = ''; };
+    // expose functions for debugging
+    window._apiPost = apiPost;
+    window._send = sendEnvelope;
 </script>
 </body>
 </html>

@@ -42,4 +42,9 @@ public class SendMessageRequest {
      * 前端先通过 presign 上传，拿到 attachmentId。
      */
     private Long attachmentId;
+
+    /**
+     * 用于幂等性检验
+     */
+    private String clientMessageId;
 }
