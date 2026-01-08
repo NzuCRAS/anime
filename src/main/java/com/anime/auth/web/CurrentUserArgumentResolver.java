@@ -1,5 +1,6 @@
 package com.anime.auth.web;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.MethodParameter;
 import org.springframework.lang.Nullable;
 import org.springframework.security.core.Authentication;
@@ -15,6 +16,7 @@ import org.springframework.web.method.support.ModelAndViewContainer;
  * - 从 SecurityContextHolder 的 Authentication.getPrincipal() 中读取。
  * - 如果 principal 为 Long，直接返回；否则尝试解析数字或返回 null。
  */
+@Slf4j
 @Component
 public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
 
@@ -35,6 +37,7 @@ public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolve
         Object principal = auth.getPrincipal();
         if (principal == null) return null;
         if (principal instanceof Long) {
+            log.info("==================================" + principal + "==================================");
             return principal;
         }
         if (principal instanceof String) {

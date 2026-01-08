@@ -6,6 +6,7 @@ import com.anime.common.dto.chat.session.SessionItem;
 import com.anime.common.entity.chat.UserFriend;
 import com.anime.common.entity.chat.UserFriendRequest;
 import com.anime.common.entity.user.User;
+import com.anime.common.enums.SocketType;
 import com.anime.common.mapper.chat.UserFriendMapper;
 import com.anime.common.mapper.chat.UserFriendRequestMapper;
 import com.anime.common.mapper.user.UserMapper;
@@ -16,8 +17,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -32,54 +36,6 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
     private final AttachmentService attachmentService;
     private final UserFriendRequestMapper userFriendRequestMapper;
     private final WsEventPublisher wsEventPublisher;
-
-    @Transactional
-    public AddFriendResponse addFriend(AddFriendRequest request, Long currentUserId) {
-        Long friendUid = request.getFriendUid();
-        if (friendUid == null) {
-            throw new IllegalArgumentException("friendUuid 不能为空");
-        }
-        if (currentUserId.equals(friendUid)) {
-            throw new IllegalArgumentException("不能添加自己为好友");
-        }
-
-        // 1. 通过 UUID（这里等价 userId）查找对方用户
-        User friend = userMapper.selectById(friendUid);
-        if (friend == null) {
-            throw new IllegalArgumentException("目标用户不存在");
-        }
-        Long friendId = friend.getId();
-
-        // 2. 检查是否已是好友
-        long count = this.count(Wrappers.<UserFriend>lambdaQuery()
-                .eq(UserFriend::getUserId, currentUserId)
-                .eq(UserFriend::getFriendId, friendId));
-        if (count == 0) {
-            // 插入双向关系
-            UserFriend uf1 = new UserFriend();
-            uf1.setUserId(currentUserId);
-            uf1.setFriendId(friendId);
-            this.save(uf1);
-
-            UserFriend uf2 = new UserFriend();
-            uf2.setUserId(friendId);
-            uf2.setFriendId(currentUserId);
-            this.save(uf2);
-        }
-
-        // 3. 构造响应 DTO
-        AddFriendResponse resp = new AddFriendResponse();
-        resp.setId(friend.getId());
-        resp.setUsername(friend.getUsername());
-        resp.setEmail(friend.getEmail());
-
-        Long avatarAttId = userMapper.getAvatarAttachmentIdById(friend.getId());
-        if (avatarAttId != null) {
-            String url = attachmentService.generatePresignedGetUrl(avatarAttId, 3600);
-            resp.setAvatarUrl(url);
-        }
-        return resp;
-    }
 
     public ListFriendsResponse listFriends(ListFriendsRequest request, Long currentUserId) {
         // 1. 查询好友关系
@@ -129,28 +85,26 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         User toUser = userMapper.selectById(toUserId);
         if (toUser == null) throw new IllegalArgumentException("target user not found");
 
-        // check already friends
-        long count = this.count(Wrappers.<UserFriend>lambdaQuery()
+        // 1) check already friends (either direction)
+        long countDirect = this.count(Wrappers.<UserFriend>lambdaQuery()
                 .eq(UserFriend::getUserId, currentUserId)
                 .eq(UserFriend::getFriendId, toUserId));
-        if (count > 0) {
+        long countReverse = this.count(Wrappers.<UserFriend>lambdaQuery()
+                .eq(UserFriend::getUserId, toUserId)
+                .eq(UserFriend::getFriendId, currentUserId));
+        if (countDirect > 0 || countReverse > 0) {
             SendFriendRequestResponse r = new SendFriendRequestResponse();
             r.setRequestId(null);
             r.setStatus("already_friends");
             return r;
         }
 
-        // check existing pending request from currentUser -> toUser
-        UserFriendRequest existing = userFriendRequestMapper.selectOne(
-                Wrappers.<UserFriendRequest>lambdaQuery()
-                        .eq(UserFriendRequest::getFromUserId, currentUserId)
-                        .eq(UserFriendRequest::getToUserId, toUserId)
-                        .eq(UserFriendRequest::getStatus, "pending")
-        );
-        if (existing != null) {
+        // 2) Check if there already exists an ACTIVE request between A and B (either direction) with status != 'rejected'
+        UserFriendRequest active = userFriendRequestMapper.findActiveBetween(currentUserId, toUserId);
+        if (active != null) {
             SendFriendRequestResponse r = new SendFriendRequestResponse();
-            r.setRequestId(existing.getId());
-            r.setStatus("already pending");
+            r.setRequestId(active.getId());
+            r.setStatus("already_pending_or_handled");
             return r;
         }
 
@@ -162,7 +116,26 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         fr.setStatus("pending");
         userFriendRequestMapper.insert(fr);
 
-        notifyNewFriendRequest(currentUserId, req);
+        // notify the target user after commit
+        final Long reqId = fr.getId();
+        final Long fromUserId = currentUserId;
+        final Long targetId = toUserId;
+        final String msg = message;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    var payload = java.util.Map.of(
+                            "requestId", reqId,
+                            "fromUserId", fromUserId,
+                            "message", msg
+                    );
+                    wsEventPublisher.sendToUser(targetId, SocketType.NEW_FRIEND_REQUEST.toString(), payload);
+                } catch (Exception e) {
+                    log.warn("notify NEW_FRIEND_REQUEST failed for targetId={} reqId={} err={}", targetId, reqId, e.getMessage());
+                }
+            }
+        });
 
         SendFriendRequestResponse r = new SendFriendRequestResponse();
         r.setRequestId(fr.getId());
@@ -199,6 +172,8 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
 
     /**
      * 处理好友请求（accept/reject）
+     *
+     * 规则：仅允许处理 status == 'pending' 的请求。否则抛 IllegalArgumentException("request already handled")
      */
     @Transactional
     public void handleFriendRequest(HandleFriendRequestRequest req, Long currentUserId) {
@@ -206,34 +181,79 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         UserFriendRequest fr = userFriendRequestMapper.findById(req.getRequestId());
         if (fr == null) throw new IllegalArgumentException("request not found");
         if (!fr.getToUserId().equals(currentUserId)) throw new IllegalArgumentException("not authorized to handle this request");
+
+        // Only allow handling when current status is 'pending'
+        if (!"pending".equalsIgnoreCase(fr.getStatus())) {
+            throw new IllegalArgumentException("request already handled");
+        }
+
         String action = req.getAction();
         if (action == null) throw new IllegalArgumentException("action required");
 
-        // 向好友申请发送方推送消息
-        notifyFriendResponse(fr.getFromUserId(), req);
+        final long fromUserId = fr.getFromUserId();
+        final long toUserId = fr.getToUserId();
+        final long requestId = fr.getId();
 
-        if ("accept".equalsIgnoreCase(action)) {
-            // create friendship if not exists
+        String newStatus;
+        if ("accept".equalsIgnoreCase(action)) newStatus = "accepted";
+        else if ("reject".equalsIgnoreCase(action)) newStatus = "rejected";
+        else throw new IllegalArgumentException("unknown action");
+
+        // Atomic update: only change if current status is 'pending'
+        int updated = userFriendRequestMapper.updateStatusIfCurrent(requestId, newStatus, "pending");
+        if (updated <= 0) {
+            // someone else modified concurrently or status not pending
+            throw new IllegalArgumentException("request already handled");
+        }
+
+        // If accepted, create friendship (双向) — idempotent check
+        if ("accepted".equalsIgnoreCase(newStatus)) {
             long c1 = this.count(Wrappers.<UserFriend>lambdaQuery()
-                    .eq(UserFriend::getUserId, currentUserId)
-                    .eq(UserFriend::getFriendId, fr.getFromUserId()));
-            if (c1 == 0) {
+                    .eq(UserFriend::getUserId, toUserId)
+                    .eq(UserFriend::getFriendId, fromUserId));
+            long c2 = this.count(Wrappers.<UserFriend>lambdaQuery()
+                    .eq(UserFriend::getUserId, fromUserId)
+                    .eq(UserFriend::getFriendId, toUserId));
+            if (c1 == 0 && c2 == 0) {
                 UserFriend uf1 = new UserFriend();
-                uf1.setUserId(currentUserId);
-                uf1.setFriendId(fr.getFromUserId());
+                uf1.setUserId(toUserId);
+                uf1.setFriendId(fromUserId);
                 this.save(uf1);
 
                 UserFriend uf2 = new UserFriend();
-                uf2.setUserId(fr.getFromUserId());
-                uf2.setFriendId(currentUserId);
+                uf2.setUserId(fromUserId);
+                uf2.setFriendId(toUserId);
                 this.save(uf2);
             }
-            userFriendRequestMapper.updateStatusById(fr.getId(), "accepted");
-        } else if ("reject".equalsIgnoreCase(action)) {
-            userFriendRequestMapper.updateStatusById(fr.getId(), "rejected");
-        } else {
-            throw new IllegalArgumentException("unknown action");
         }
+
+        // Register WS notifications to be sent AFTER transaction commit
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    // notify requester about the response
+                    var respPayload = java.util.Map.of(
+                            "requestId", requestId,
+                            "status", newStatus,
+                            "fromUserId", fromUserId,
+                            "toUserId", toUserId
+                    );
+                } catch (Exception e) {
+                    log.warn("notify requester failed for requestId={}, err={}", requestId, e.getMessage());
+                }
+                if ("accepted".equalsIgnoreCase(newStatus)) {
+                    try {
+                        // 给发起好友申请的用户发 FRIEND_LIST_UPDATED 事件
+                        wsEventPublisher.sendToUser(fromUserId, SocketType.ACCEPT_FRIEND_REQUEST.toString(), Map.of("userId", fromUserId));
+                    } catch (Exception e) {
+                        log.warn("notify FRIEND_LIST_UPDATED failed for requestId={}, err={}", requestId, e.getMessage());
+                    }
+                } else {
+                    wsEventPublisher.sendToUser(fromUserId, SocketType.REJECT_FRIEND_REQUEST.toString(), Map.of("userId", fromUserId));
+                }
+            }
+        });
     }
 
     /**
@@ -281,29 +301,5 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
                 .eq(UserFriend::getFriendId, currentUserId));
 
         return true;
-    }
-
-    /**
-     * 通过socket实时发送好友申请
-     */
-    private void notifyNewFriendRequest(Long userId, SendFriendRequestRequest req) {
-        try {
-            wsEventPublisher.sendToUser(userId, "NEW_FRIEND_REQUEST", req);
-        } catch (Exception e) {
-            log.warn("send friend request failed, userId={}, req={}, err={}",
-                    userId, req, e.getMessage());
-        }
-    }
-
-    /**
-     * 会话因“消息变化”（新消息、删除等）导致更新
-     */
-    private void notifyFriendResponse(Long userId, HandleFriendRequestRequest req) {
-        try {
-            wsEventPublisher.sendToUser(userId, "FRIEND_REQUEST_RESPONSE", req);
-        } catch (Exception e) {
-            log.warn("receive friend response failed, userId={}, req={}, err={}",
-                    userId, req, e.getMessage());
-        }
     }
 }

@@ -48,7 +48,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/webjars/**",
             "/public/**",
             "/static/**",
-            "/api/user/logout"
+            "/api/user/logout"/*,
+            "/api/chat/sessions/list"*/
     );
 
     private static final Set<String> STATIC_EXT_WHITELIST = Set.of(

@@ -137,7 +137,7 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessage> {
           AND is_read = 0
         GROUP BY from_user_id
         """)
-    List<PrivateUnreadCountRow> listPrivateUnreadCountsByFriend(Long currentUserId);
+    List<java.util.Map<String, Object>> listPrivateUnreadCountsByFriend(Long currentUserId);
 
     /**
      * 查询当前用户在各个群聊中的未读消息数量。
@@ -266,11 +266,6 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessage> {
 
     interface GroupUnreadCountRow {
         Long getGroupId();
-        Long getUnreadCount();
-    }
-
-    interface PrivateUnreadCountRow {
-        Long getFriendId();
         Long getUnreadCount();
     }
 }

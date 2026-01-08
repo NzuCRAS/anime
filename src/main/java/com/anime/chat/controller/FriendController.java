@@ -44,6 +44,7 @@ public class FriendController {
     @PostMapping("/request/send")
     public Result<SendFriendRequestResponse> sendFriendRequest(@RequestBody SendFriendRequestRequest req,
                                                                @CurrentUser Long userId) {
+        req.setFromUserId(userId);
         try {
             SendFriendRequestResponse resp = friendService.sendFriendRequest(req, userId);
             return Result.success(resp);
@@ -95,6 +96,7 @@ public class FriendController {
     public Result<SearchUserResponse> searchUser(@RequestBody SearchUserRequest req) {
         try {
             SearchUserResponse resp = friendService.searchById(req);
+            System.out.println(resp.toString());
             return Result.success(resp);
         } catch (Exception e) {
             log.error("searchUser error", e);
