@@ -2,12 +2,20 @@ package com.anime.chat.controller;
 
 import com.anime.auth.web.CurrentUser;
 import com.anime.chat.service.ChatMessageService;
+import com.anime.common.dto.attachment.PresignRequestDTO;
+import com.anime.common.dto.attachment.PresignResponseDTO;
 import com.anime.common.dto.chat.message.*;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
+import com.anime.common.service.AttachmentService;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * 历史消息查询接口：
@@ -23,6 +31,23 @@ import org.springframework.web.bind.annotation.*;
 public class ChatMessageController {
 
     private final ChatMessageService chatMessageService;
+    private final AttachmentService attachmentService;
+
+    @Operation(summary = "获取 presign（聊天）", description = "生成 presigned PUT URL，供前端上传用户头像")
+    @PostMapping("/presign")
+    public ResponseEntity<?> presign(@RequestBody PresignRequestDTO req, @CurrentUser Long userId) {
+        String storagePath = "/userAvatar/" + userId + "/"+ LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        log.info("presign request storagePath={} originalFilename={} mimeType={} uploadedBy={}",
+                storagePath, req.getOriginalFilename(), req.getMimeType(), userId);
+        try {
+            PresignResponseDTO resp = attachmentService.preCreateAndPresign(
+                    storagePath, req.getMimeType(), userId, req.getOriginalFilename(), null, null);
+            return ResponseEntity.ok(resp);
+        } catch (Exception ex) {
+            log.error("presign failed", ex);
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body("presign failed");
+        }
+    }
 
     /**
      * 获取与某好友的历史私聊消息

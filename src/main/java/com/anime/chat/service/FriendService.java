@@ -120,19 +120,19 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         final Long reqId = fr.getId();
         final Long fromUserId = currentUserId;
         final Long targetId = toUserId;
-        final String msg = message;
+        final String msg = message == null ? "" : message;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 try {
-                    var payload = java.util.Map.of(
+                    var payload = Map.of(
                             "requestId", reqId,
                             "fromUserId", fromUserId,
                             "message", msg
                     );
                     wsEventPublisher.sendToUser(targetId, SocketType.NEW_FRIEND_REQUEST.toString(), payload);
                 } catch (Exception e) {
-                    log.warn("notify NEW_FRIEND_REQUEST failed for targetId={} reqId={} err={}", targetId, reqId, e.getMessage());
+                    log.error("notify NEW_FRIEND_REQUEST failed for targetId={} reqId={} err={}", targetId, reqId, e.getMessage());
                 }
             }
         });

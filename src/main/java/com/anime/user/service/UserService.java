@@ -206,4 +206,26 @@ public class UserService {
         }
         return null;
     }
+
+    /**
+     * 更新用户的个人签名
+     * 返回 true 表示更新成功（受影响行数 > 0），false 表示没有更新（比如 userId 不存在）
+     */
+    @Transactional
+    public boolean updatePersonalSignature(Long userId, String signature) {
+        if (userId == null) throw new IllegalArgumentException("userId required");
+        if (signature == null) signature = "";
+        // 可限制签名长度，例如 200 字符
+        if (signature.length() > 200) {
+            throw new IllegalArgumentException("personalSignature length must <= 200");
+        }
+        try {
+            int rows = userMapper.updatePersonalSignatureById(userId, signature);
+            log.info("updatePersonalSignature: userId={} rows={}", userId, rows);
+            return rows > 0;
+        } catch (Exception e) {
+            log.error("updatePersonalSignature failed userId={} err={}", userId, e.getMessage(), e);
+            throw new RuntimeException("update personal signature failed", e);
+        }
+    }
 }

@@ -25,7 +25,7 @@ public class WsEventPublisher {
             env.setType(type);
             env.setPayload(payload);
             String json = objectMapper.writeValueAsString(env);
-            log.error("WsEventPublisher sendToUser userId={}, type={}, json={}",
+            log.info("WsEventPublisher sendToUser userId={}, type={}, json={}",
                     userId, type, json);
             sessionManager.sendToUser(userId, new TextMessage(json));
         } catch (Exception e) {
