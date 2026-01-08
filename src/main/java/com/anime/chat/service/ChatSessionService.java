@@ -64,6 +64,7 @@ public class ChatSessionService {
             if (friend != null) {
                 item.setTitle(friend.getUsername());
                 Long avatarAttId = userMapper.getAvatarAttachmentIdById(friendId);
+                item.setSignature(friend.getPersonalSignature());
                 if (avatarAttId != null) {
                     item.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarAttId, 3600));
                 }
@@ -110,6 +111,75 @@ public class ChatSessionService {
         ListSessionsResponse resp = new ListSessionsResponse();
         resp.setSessions(result);
         return resp;
+    }
+
+    /**
+     * 为某个用户构建一个单聊会话的 SessionItem（用于 WS 实时更新）
+     * - userId: 当前用户
+     * - friendId: 对方用户
+     */
+    public SessionItem buildPrivateSessionItem(Long userId, Long friendId) {
+        // 1. 最新一条消息
+        ChatMessage last = chatMessageMapper.findLastPrivateMessage(userId, friendId);
+        // 2. 未读数量（当前用户作为接收方）
+        Long unread = chatMessageMapper.countPrivateUnread(userId, friendId);
+        long unreadCount = unread != null ? unread : 0L;
+
+        SessionItem item = new SessionItem();
+        item.setSessionType("PRIVATE");
+        item.setSessionTargetId(friendId);
+        item.setUnreadCount((int) unreadCount);
+
+        if (last != null) {
+            item.setLastMessageTime(last.getCreatedAt());
+            item.setLastMessagePreview(buildPreview(last.getMessageType(), last.getContent()));
+        }
+
+        // 填充好友标题和头像（和 listSessions 里一样的逻辑）
+        User friend = userMapper.selectById(friendId);
+        if (friend != null) {
+            item.setTitle(friend.getUsername());
+            Long avatarAttId = userMapper.getAvatarAttachmentIdById(friendId);
+            if (avatarAttId != null) {
+                item.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarAttId, 3600));
+            }
+        }
+
+        return item;
+    }
+
+    /**
+     * 为当前用户构建一个群聊会话的 SessionItem（用于 WS 实时更新）
+     */
+    public SessionItem buildGroupSessionItem(Long currentUserId, Long groupId) {
+        // 1. 最新一条群消息（当前用户视角）
+        ChatMessage last = chatMessageMapper.findLastGroupMessage(groupId, currentUserId);
+        // 2. 未读数量
+        Long unread = chatMessageMapper.countGroupUnread(groupId, currentUserId);
+        long unreadCount = unread != null ? unread : 0L;
+
+        SessionItem item = new SessionItem();
+        item.setSessionType("GROUP");
+        item.setSessionTargetId(groupId);
+        item.setUnreadCount((int) unreadCount);
+
+        if (last != null) {
+            item.setLastMessageTime(last.getCreatedAt());
+            item.setLastMessagePreview(buildPreview(last.getMessageType(), last.getContent()));
+        }
+
+        // 3. 群信息（名称等）
+        ChatGroup group = chatGroupMapper.selectById(groupId);
+        if (group != null) {
+            item.setTitle(group.getName());
+            // 如果以后在 ChatGroup 里有 avatarAttachmentId，可以在这里生成 avatarUrl
+            // Long avatarAttId = group.getAvatarAttachmentId();
+            // if (avatarAttId != null) {
+            //     item.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarAttId, 3600));
+            // }
+        }
+
+        return item;
     }
 
     /**

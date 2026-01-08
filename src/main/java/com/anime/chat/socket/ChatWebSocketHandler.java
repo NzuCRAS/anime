@@ -15,15 +15,14 @@ import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * WebSocket 处理器：负责接收消息、调用业务层、广播消息。
  *
- * 已修正：
- * - 私聊：为发送者与接收者分别构造并发送各自视角的 NewMessageResponse（确保 payload.toUserId 对应接收者）
- * - 群聊：为每个群成员构造单独的 payload（toUserId = 该成员），并逐个发送（不再复用发送者视角用于所有接收者）
+ * 已修正：使用 WebSocketSessionManager 管理会话与发送，避免 handler 内直接维护并发集合。
+ * 增强：在持久化成功后向发送方发送 ACK（包含 clientMessageId 与 serverMessageId），然后再投递 NEW_MESSAGE 给接收方。
  */
 @Slf4j
 @Component
@@ -34,9 +33,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final AttachmentService attachmentService;
     private final ChatGroupMemberMapper chatGroupMemberMapper;
     private final ObjectMapper objectMapper;
-
-    // userId -> 多个 WebSocketSession
-    private final Map<Long, java.util.Set<WebSocketSession>> onlineUsers = new ConcurrentHashMap<>();
+    private final WebSocketSessionManager sessionManager;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -46,7 +43,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             closeSession(session, CloseStatus.BAD_DATA);
             return;
         }
-        onlineUsers.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet()).add(session);
+        sessionManager.register(userId, session);
         log.info("WS connected: userId={} sessionId={}", userId, session.getId());
     }
 
@@ -71,8 +68,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
 
         if ("SEND_MESSAGE".equalsIgnoreCase(envelope.getType())) {
-            // 因为 ObjectMapper 反序列化成原始类型会丢掉泛型信息，
-            // 这里再手动反一次 payload 部分。
+            // Because of type erasure we deserialize payload with explicit generic type
             WebSocketEnvelope<SendMessageRequest> env =
                     objectMapper.readValue(payload,
                             objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, SendMessageRequest.class));
@@ -84,7 +80,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private void handleSendMessage(WebSocketSession session, Long fromUserId, SendMessageRequest req) {
         try {
-            // 1. 基本校验
+            // 1. basic validation
             String convType = req.getConversationType();
             String msgType = req.getMessageType();
             if (convType == null || msgType == null) {
@@ -111,7 +107,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 2. 调用业务层保存消息（saveMessage 会为每个接收者插入视角记录）
+            // 2. save message via service (service handles persistence and any per-recipient logic)
+            // pass through clientMessageId for idempotency
             ChatMessage saved = chatMessageService.saveMessage(
                     convType.toUpperCase(),
                     fromUserId,
@@ -119,17 +116,40 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     groupId,
                     msgType.toUpperCase(),
                     req.getContent(),
-                    req.getAttachmentId()
+                    req.getAttachmentId(),
+                    req.getClientMessageId()
             );
 
-            // 3. 构造并发送消息：针对不同接收方构造不同 payload，确保 toUserId 与接收者一致
+            // 2.a Send ACK to sender (indicates server has persisted the message)
+            try {
+                Map<String, Object> ackPayload = new HashMap<>();
+                if (req.getClientMessageId() != null) {
+                    ackPayload.put("clientMessageId", req.getClientMessageId());
+                }
+                // prefer logicMessageId if present as the canonical serverMessageId for the logical message
+                Long serverMessageId = saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId();
+                ackPayload.put("serverMessageId", serverMessageId);
+                ackPayload.put("status", "received");
+                ackPayload.put("ts", System.currentTimeMillis());
+
+                WebSocketEnvelope<Map<String, Object>> ackEnv = new WebSocketEnvelope<>();
+                ackEnv.setType("ACK");
+                ackEnv.setPayload(ackPayload);
+                String ackJson = objectMapper.writeValueAsString(ackEnv);
+                sessionManager.sendToUser(fromUserId, new TextMessage(ackJson));
+            } catch (Exception e) {
+                log.warn("Failed to send ACK to user {}: {}", fromUserId, e.getMessage());
+                // continue: we still attempt to send NEW_MESSAGE to recipients
+            }
+
+            // 3. build and send messages: ensure each recipient receives a payload whose toUserId equals that recipient
             if ("PRIVATE".equalsIgnoreCase(convType)) {
-                // 构造发送者视角 payload（发送给发送者自己）
+                // Sender's view payload
                 NewMessageResponse respForSender = new NewMessageResponse();
                 respForSender.setId(saved.getId());
                 respForSender.setConversationType(saved.getConversationType());
                 respForSender.setFromUserId(saved.getFromUserId());
-                respForSender.setToUserId(saved.getFromUserId()); // 发送者视角：to = 自己
+                respForSender.setToUserId(saved.getFromUserId()); // sender's perspective: to = self
                 respForSender.setGroupId(saved.getGroupId());
                 respForSender.setMessageType(saved.getMessageType());
                 respForSender.setContent(saved.getContent());
@@ -144,13 +164,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 String jsonSender = objectMapper.writeValueAsString(envSender);
                 TextMessage outMsgSender = new TextMessage(jsonSender);
 
-                // 构造接收者视角 payload（确保 toUserId = 请求中的 targetUserId）
+                // Receiver's view payload
                 NewMessageResponse respForReceiver = new NewMessageResponse();
-                // 这里 id 使用 logicMessageId if present，否则使用 saved.id （注意：不一定等于接收者那条记录 id）
                 respForReceiver.setId(saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId());
                 respForReceiver.setConversationType(saved.getConversationType());
                 respForReceiver.setFromUserId(saved.getFromUserId());
-                respForReceiver.setToUserId(toUserId); // 关键：接收者视角 to = targetUserId
+                respForReceiver.setToUserId(toUserId); // receiver's perspective: to = recipient
                 respForReceiver.setGroupId(saved.getGroupId());
                 respForReceiver.setMessageType(saved.getMessageType());
                 respForReceiver.setContent(saved.getContent());
@@ -165,14 +184,14 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 String jsonReceiver = objectMapper.writeValueAsString(envReceiver);
                 TextMessage outMsgReceiver = new TextMessage(jsonReceiver);
 
-                // 4. 发送：发送者自己先收到自己的 payload
-                sendToUser(fromUserId, outMsgSender);
-                // 再发送给接收者（如果接收者不是自己）
+                // send to sender
+                sessionManager.sendToUser(fromUserId, outMsgSender);
+                // send to receiver (if different)
                 if (toUserId != null && !toUserId.equals(fromUserId)) {
-                    sendToUser(toUserId, outMsgReceiver);
+                    sessionManager.sendToUser(toUserId, outMsgReceiver);
                 }
             } else if ("GROUP".equalsIgnoreCase(convType)) {
-                // 为群聊每个成员构造独立 payload 并发送（确保 toUserId 为当前成员）
+                // Build base response and send a per-member payload
                 NewMessageResponse baseResp = new NewMessageResponse();
                 baseResp.setId(saved.getId());
                 baseResp.setConversationType(saved.getConversationType());
@@ -185,7 +204,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     baseResp.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
                 }
 
-                // 发送到群内每个成员（sendToGroup 会为每个成员构造其视角 payload）
                 sendToGroup(saved.getGroupId(), baseResp);
             }
 
@@ -194,24 +212,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void sendToUser(Long userId, TextMessage message) {
-        java.util.Set<WebSocketSession> set = onlineUsers.get(userId);
-        if (set == null || set.isEmpty()) return;
-        for (WebSocketSession s : set) {
-            if (s.isOpen()) {
-                try {
-                    s.sendMessage(message);
-                } catch (IOException e) {
-                    log.warn("WS send to user {} failed: {}", userId, e.getMessage());
-                }
-            }
-        }
-    }
-
-    /**
-     * 向群内所有成员发送消息（仅群成员会收到）。
-     * 为每个接收者单独构造 payload（toUserId = uid）。
-     */
     private void sendToGroup(Long groupId, NewMessageResponse baseResp) {
         try {
             var memberIds = chatGroupMemberMapper.listUserIdsByGroupId(groupId);
@@ -226,7 +226,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 respForUser.setId(baseResp.getId());
                 respForUser.setConversationType(baseResp.getConversationType());
                 respForUser.setFromUserId(baseResp.getFromUserId());
-                respForUser.setToUserId(uid); // 每个接收者的视角
+                respForUser.setToUserId(uid); // recipient-specific view
                 respForUser.setGroupId(baseResp.getGroupId());
                 respForUser.setMessageType(baseResp.getMessageType());
                 respForUser.setContent(baseResp.getContent());
@@ -240,24 +240,10 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 String json = objectMapper.writeValueAsString(out);
                 TextMessage outMsg = new TextMessage(json);
 
-                sendToUser(uid, outMsg);
+                sessionManager.sendToUser(uid, outMsg);
             }
         } catch (Exception e) {
             log.error("WS sendToGroup failed, groupId={}", groupId, e);
-        }
-    }
-
-    private void broadcast(TextMessage message) {
-        for (Map.Entry<Long, java.util.Set<WebSocketSession>> entry : onlineUsers.entrySet()) {
-            for (WebSocketSession s : entry.getValue()) {
-                if (s.isOpen()) {
-                    try {
-                        s.sendMessage(message);
-                    } catch (IOException e) {
-                        log.warn("WS broadcast to user {} failed: {}", entry.getKey(), e.getMessage());
-                    }
-                }
-            }
         }
     }
 
@@ -265,13 +251,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         Long userId = getUserId(session);
         if (userId != null) {
-            java.util.Set<WebSocketSession> set = onlineUsers.get(userId);
-            if (set != null) {
-                set.remove(session);
-                if (set.isEmpty()) {
-                    onlineUsers.remove(userId);
-                }
-            }
+            sessionManager.unregister(userId, session);
             log.info("WS disconnected: userId={} sessionId={} status={}", userId, session.getId(), status);
         }
     }

@@ -322,24 +322,6 @@ https://minio-host/test-bucket/videos/42/hls/stream_0_000.ts?X-Amz-...
 
 ---
 
-### POST /api/chat/friends/add
-立即添加好友（直接建立双向关系）
-
-请求（AddFriendRequest）
-```json
-{ "friendUid": 201 }
-```
-
-响应（AddFriendResponse）
-```json
-{ "id": 201, "username":"alice", "email":"a@x.com", "avatarUrl":"https://..." }
-```
-
-说明
-- 若已经是好友，接口保持幂等（不会重复插入）。
-
----
-
 ### POST /api/chat/friends/remove
 删除好友（双向删除）
 

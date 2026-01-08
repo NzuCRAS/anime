@@ -3,6 +3,7 @@ package com.anime.common.mapper.chat;
 import com.anime.common.entity.chat.ChatMessage;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -169,6 +170,99 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessage> {
         """)
     int markGroupMessagesRead(Long currentUserId, Long groupId);
 
+    /**
+     * 根据发送者和 clientMessageId 查找已存在的记录（返回所有匹配记录）
+     * - 用于幂等检测：如果存在，说明该逻辑消息已被插入（可能包含发送者视角与接收者视角多条记录）
+     */
+    @Select("SELECT * FROM chat_messages WHERE from_user_id = #{fromUserId} AND client_message_id = #{clientMessageId}")
+    List<ChatMessage> selectByFromAndClientId(@Param("fromUserId") Long fromUserId,
+                                              @Param("clientMessageId") String clientMessageId);
+
+    /**
+     * 查询某用户与某好友之间的最新一条私聊消息（按时间倒序取 1 条）
+     *
+     * 注意：这里仍然是“消息表”的记录（可能是本人视角或对方视角），
+     * 用于会话列表展示 lastMessagePreview/lastMessageTime
+     */
+    @Select("""
+        SELECT *
+        FROM chat_messages
+        WHERE conversation_type = 'PRIVATE'
+          AND deleted_at IS NULL
+          AND (
+                (from_user_id = #{userId} AND to_user_id = #{friendId})
+             OR (from_user_id = #{friendId} AND to_user_id = #{userId})
+          )
+        ORDER BY created_at DESC
+        LIMIT 1
+        """)
+    ChatMessage findLastPrivateMessage(@Param("userId") Long userId,
+                                       @Param("friendId") Long friendId);
+
+    /**
+     * 查询某用户作为接收方，来自指定好友的未读私聊消息数量
+     */
+    @Select("""
+        SELECT COUNT(*)
+        FROM chat_messages
+        WHERE conversation_type = 'PRIVATE'
+          AND deleted_at IS NULL
+          AND to_user_id = #{userId}
+          AND from_user_id = #{friendId}
+          AND is_read = 0
+        """)
+    Long countPrivateUnread(@Param("userId") Long userId,
+                            @Param("friendId") Long friendId);
+
+
+    @Select("""
+    SELECT id
+    FROM chat_messages
+    WHERE conversation_type = 'PRIVATE'
+      AND deleted_at IS NULL
+      AND from_user_id = #{friendId}    -- 对方发给我的消息
+      AND to_user_id = #{currentUserId}
+      AND is_read = 1
+    ORDER BY created_at DESC
+    LIMIT 1
+    """)
+    Long findLastReadMessageIdBetween(@Param("currentUserId") Long currentUserId,
+                                      @Param("friendId") Long friendId);
+
+    /**
+     * 查询当前用户在某个群中的最新一条群聊消息（按时间倒序取 1 条）
+     *
+     * 注意：
+     * - 这里用的是“当前用户视角”的记录（to_user_id = currentUserId）
+     * - 用于会话列表里的 lastMessagePreview/lastMessageTime
+     */
+    @Select("""
+        SELECT *
+        FROM chat_messages
+        WHERE conversation_type = 'GROUP'
+          AND deleted_at IS NULL
+          AND group_id = #{groupId}
+          AND to_user_id = #{currentUserId}
+        ORDER BY created_at DESC
+        LIMIT 1
+        """)
+    ChatMessage findLastGroupMessage(@Param("groupId") Long groupId,
+                                     @Param("currentUserId") Long currentUserId);
+
+    /**
+     * 查询当前用户在某个群中的未读消息数量
+     */
+    @Select("""
+        SELECT COUNT(*)
+        FROM chat_messages
+        WHERE conversation_type = 'GROUP'
+          AND deleted_at IS NULL
+          AND group_id = #{groupId}
+          AND to_user_id = #{currentUserId}
+          AND is_read = 0
+        """)
+    Long countGroupUnread(@Param("groupId") Long groupId,
+                          @Param("currentUserId") Long currentUserId);
 
     interface GroupUnreadCountRow {
         Long getGroupId();

@@ -1,13 +1,41 @@
-package com.anime.common.dto.chat.session;
+接口：
 
-import lombok.Data;
+```/api/chat/sessions/list```
 
-import java.time.LocalDateTime;
+无传入内容
 
-/**
- * 单个会话条目（左侧列表的一行）
- */
-@Data
+返回内容：
+
+参考json：
+
+```json
+{
+  "sessions":[
+    { "sessionTargetId"(也就是用户id):"4", "sessionType":"PRIVATE", "title"(也就是好友名称):"name", "lastMessage"(如果是图片就显示“[图片]”):"Hi", "lastMessageTime":"2026-01-06 16:00:00", "unreadCount":2 , "signature": "个性签名", "avatarUrl" :"一串getUrl"},
+    { "sessionTargetId":"5", "sessionType":"PRIVATE", "title":"name", "lastMessage":"Hi", "lastMessageTime":"2026-01-06 16:00:00", "unreadCount":103 , "signature": "个性签名", "avatarUrl" :"一串getUrl"}
+  ]
+}
+```
+
+ListSessionsResponse：
+
+```
+
+public class ListSessionsResponse {
+
+    /**
+     * 当前用户所有会话（单聊 + 群聊），
+     * 已按 lastMessageTime 从新到旧排序
+     */
+    private List<SessionItem> sessions;
+}
+
+```
+
+每一个SessionItem ：
+
+```
+
 public class SessionItem {
 
     /**
@@ -56,3 +84,5 @@ public class SessionItem {
      */
     private String avatarUrl;
 }
+
+```
