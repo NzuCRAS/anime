@@ -33,14 +33,11 @@ public class ChatSessionController {
      */
     @PostMapping("/list")
     public Result<ListSessionsResponse> listSessions(
-            @RequestBody(required = false) ListSessionsRequest request,
             @CurrentUser Long userId) {
-
         try {
-            if (request == null) {
-                request = new ListSessionsRequest();
-            }
-            ListSessionsResponse resp = chatSessionService.listSessions(request, userId);
+            ListSessionsResponse resp = chatSessionService.listSessions(userId);
+            log.error("===========================session list==============================");
+            log.error(resp.toString());
             return Result.success(resp);
         } catch (IllegalArgumentException e) {
             log.error(e.getMessage());

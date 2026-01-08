@@ -5,6 +5,7 @@ import com.anime.common.dto.chat.message.*;
 import com.anime.common.dto.chat.session.SessionItem;
 import com.anime.common.entity.chat.ChatMessage;
 import com.anime.common.entity.user.User;
+import com.anime.common.enums.SocketType;
 import com.anime.common.mapper.chat.ChatGroupMemberMapper;
 import com.anime.common.mapper.chat.ChatMessageMapper;
 import com.anime.common.service.AttachmentService;
@@ -14,6 +15,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.Socket;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -259,16 +261,14 @@ public class ChatMessageService {
 
         // 已读持久化
         int updated = chatMessageMapper.markPrivateMessagesRead(currentUserId, friendId);
-        log.info("markPrivateMessagesRead: userId={} friendId={} updated={}", currentUserId, friendId, updated);
 
         if (updated > 0) {
             try {
                 // 1) 当前用户会话列表：读数清零（给自己推会话快照）
-                notifySessionReadForPrivate(currentUserId, friendId);
+                /*notifySessionReadForPrivate(currentUserId, friendId);*/
 
                 // 2) 查找已读到的最后一条消息 id（对方发给我的）
                 Long lastReadMessageId = chatMessageMapper.findLastReadMessageIdBetween(currentUserId, friendId);
-                log.info("markPrivateMessagesRead: lastReadMessageId for reader={} friend={} => {}", currentUserId, friendId, lastReadMessageId);
 
                 if (lastReadMessageId != null) {
                     var payload = java.util.Map.of(
@@ -277,8 +277,7 @@ public class ChatMessageService {
                             "friendId", friendId,
                             "lastReadMessageId", lastReadMessageId
                     );
-                    log.info("markPrivateMessagesRead: sending MESSAGES_READ to userId={} payload={}", friendId, payload);
-                    wsEventPublisher.sendToUser(friendId, "MESSAGES_READ", payload);
+                    wsEventPublisher.sendToUser(friendId, SocketType.PRIVATE_MESSAGES_READ.toString(), payload);
                 } else {
                     log.info("markPrivateMessagesRead: no lastReadMessageId found (maybe no messages from friend)");
                 }
@@ -344,16 +343,19 @@ public class ChatMessageService {
     private void notifySessionNewMessageForPrivate(Long userId, Long friendId) {
         try {
             SessionItem item = chatSessionService.buildPrivateSessionItem(userId, friendId);
-            wsEventPublisher.sendToUser(userId, "NEW_MESSAGE", item);
+            wsEventPublisher.sendToUser(userId, SocketType.NEW_PRIVATE_MESSAGE.toString(), item);
         } catch (Exception e) {
             log.warn("notifySessionMessageUpdatedForPrivate failed, userId={}, friendId={}, err={}",
                     userId, friendId, e.getMessage());
         }
     }
 
-    /**
+/*
+    */
+/**
      * 会话因“已读状态变化”导致更新
-     */
+     *//*
+
     private void notifySessionReadForPrivate(Long userId, Long friendId) {
         try {
             SessionItem item = chatSessionService.buildPrivateSessionItem(userId, friendId);
@@ -363,6 +365,7 @@ public class ChatMessageService {
                     userId, friendId, e.getMessage());
         }
     }
+*/
 
     /**
      * 群会话因“新消息”导致更新（给某个成员）
@@ -370,7 +373,7 @@ public class ChatMessageService {
     private void notifySessionNewMessageForGroup(Long userId, Long groupId) {
         try {
             SessionItem item = chatSessionService.buildGroupSessionItem(userId, groupId);
-            wsEventPublisher.sendToUser(userId, "GROUP_SESSION_NEW_MESSAGE", item);
+            wsEventPublisher.sendToUser(userId, SocketType.NEW_GROUP_MESSAGE.toString(), item);
         } catch (Exception e) {
             log.warn("notifySessionNewMessageForGroup failed, userId={}, groupId={}, err={}",
                     userId, groupId, e.getMessage());
@@ -384,7 +387,7 @@ public class ChatMessageService {
     private void notifySessionReadForGroup(Long userId, Long groupId) {
         try {
             SessionItem item = chatSessionService.buildGroupSessionItem(userId, groupId);
-            wsEventPublisher.sendToUser(userId, "GROUP_SESSION_READ", item);
+            wsEventPublisher.sendToUser(userId, SocketType.GROUP_MESSAGES_READ.toString(), item);
         } catch (Exception e) {
             log.warn("notifySessionReadForGroup failed, userId={}, groupId={}, err={}",
                     userId, groupId, e.getMessage());

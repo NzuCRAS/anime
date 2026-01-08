@@ -1,5 +1,6 @@
 package com.anime.chat.socket;
 
+import com.anime.chat.service.PresenceService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -26,12 +27,12 @@ import java.util.concurrent.*;
 public class WebSocketSessionManager {
 
     private final ObjectMapper objectMapper;
+    private final PresenceService presenceService;
 
     // userId -> sessions
     private final ConcurrentMap<Long, CopyOnWriteArraySet<WebSocketSession>> sessionsByUser = new ConcurrentHashMap<>();
 
     // sessionId -> single-thread executor for serializing sends to that session
-    // 每个socket分配一个线程
     private final ConcurrentMap<String, ExecutorService> sessionExecutors = new ConcurrentHashMap<>();
 
     // shared pool for lightweight tasks (not actual sends)
@@ -42,8 +43,9 @@ public class WebSocketSessionManager {
         return t;
     });
 
-    public WebSocketSessionManager(ObjectMapper objectMapper) {
+    public WebSocketSessionManager(ObjectMapper objectMapper, PresenceService presenceService) {
         this.objectMapper = objectMapper;
+        this.presenceService = presenceService;
     }
 
     /**
@@ -58,7 +60,10 @@ public class WebSocketSessionManager {
      */
     public void registerSession(Long userId, WebSocketSession session) {
         if (userId == null || session == null) return;
-        sessionsByUser.computeIfAbsent(userId, k -> new CopyOnWriteArraySet<>()).add(session);
+
+        CopyOnWriteArraySet<WebSocketSession> set = sessionsByUser.computeIfAbsent(userId, k -> new CopyOnWriteArraySet<>());
+        set.add(session);
+
         // create per-session single-thread executor
         sessionExecutors.compute(session.getId(), (sid, existing) -> {
             if (existing == null || existing.isShutdown() || existing.isTerminated()) {
@@ -72,8 +77,18 @@ public class WebSocketSessionManager {
             }
             return existing;
         });
-        log.debug("register session userId={} sessionId={} totalSessionsForUser={}",
-                userId, session.getId(), sessionsByUser.getOrDefault(userId, new CopyOnWriteArraySet<>()).size());
+
+        int total = sessionsByUser.getOrDefault(userId, new CopyOnWriteArraySet<>()).size();
+        log.debug("register session userId={} sessionId={} totalSessionsForUser={}", userId, session.getId(), total);
+
+        // 如果这是用户的第一个 session（从 0 -> 1），触发上线广播
+        if (total == 1) {
+            try {
+                presenceService.userOnline(userId);
+            } catch (Exception e) {
+                log.warn("registerSession: presenceService.userOnline failed for userId={} err={}", userId, e.getMessage(), e);
+            }
+        }
     }
 
     /**
@@ -101,8 +116,17 @@ public class WebSocketSessionManager {
                 ex.shutdownNow();
             } catch (Exception ignore) {}
         }
-        log.debug("unregister session userId={} sessionId={} remainingForUser={}",
-                userId, session.getId(), sessionsByUser.getOrDefault(userId, new CopyOnWriteArraySet<>()).size());
+        int remaining = sessionsByUser.getOrDefault(userId, new CopyOnWriteArraySet<>()).size();
+        log.debug("unregister session userId={} sessionId={} remainingForUser={}", userId, session.getId(), remaining);
+
+        // 如果这是最后一个 session 被移除（变成 0），触发下线广播
+        if (remaining == 0) {
+            try {
+                presenceService.userOffline(userId);
+            } catch (Exception e) {
+                log.warn("unregisterSession: presenceService.userOffline failed for userId={} err={}", userId, e.getMessage(), e);
+            }
+        }
     }
 
     /**
@@ -121,7 +145,6 @@ public class WebSocketSessionManager {
             if (s == null) continue;
             ExecutorService ex = sessionExecutors.get(s.getId());
             if (ex == null) {
-                // create executor if missing (race)
                 ex = Executors.newSingleThreadExecutor(r -> {
                     Thread t = new Thread(r);
                     t.setName("ws-send-" + s.getId());
@@ -149,8 +172,7 @@ public class WebSocketSessionManager {
                             sessionRef.sendMessage(msgRef);
                         }
                     } catch (Throwable sendErr) {
-                        log.warn("sendToUser(TextMessage): unexpected error sending to userId={} sessionId={} err={}",
-                                userId, sessionRef.getId(), sendErr.getMessage(), sendErr);
+                        log.warn("sendToUser(TextMessage): unexpected error sending to userId={} sessionId={} err={}", userId, sessionRef.getId(), sendErr.getMessage(), sendErr);
                         try { sessionRef.close(); } catch (Exception ignore) {}
                         try { unregisterSession(userId, sessionRef); } catch (Exception ignore2) {}
                     }
@@ -174,7 +196,6 @@ public class WebSocketSessionManager {
             return;
         }
 
-        // prepare JSON once
         final String jsonPayload;
         try {
             java.util.Map<String, Object> env = new java.util.HashMap<>();
@@ -190,7 +211,6 @@ public class WebSocketSessionManager {
             if (s == null) continue;
             ExecutorService ex = sessionExecutors.get(s.getId());
             if (ex == null) {
-                // create executor if missing (race)
                 ex = Executors.newSingleThreadExecutor(r -> {
                     Thread t = new Thread(r);
                     t.setName("ws-send-" + s.getId());
@@ -209,7 +229,6 @@ public class WebSocketSessionManager {
             final ExecutorService executorRef = ex;
             try {
                 executorRef.submit(() -> {
-                    // extra guard: synchronized on session to be extra-safe with underlying impl
                     try {
                         synchronized (sessionRef) {
                             if (!sessionRef.isOpen()) {
@@ -219,16 +238,9 @@ public class WebSocketSessionManager {
                             sessionRef.sendMessage(new TextMessage(payload));
                         }
                     } catch (Throwable sendErr) {
-                        log.warn("sendToUser: unexpected error sending to userId={} sessionId={} err={}",
-                                userId, sessionRef.getId(), sendErr.getMessage(), sendErr);
-                        // 若发送失败，尝试注销该 session，避免后续不断失败
-                        try {
-                            sessionRef.close();
-                        } catch (Exception ignore) {}
-                        try {
-                            // we have the userId already
-                            unregisterSession(userId, sessionRef);
-                        } catch (Exception ignore2) {}
+                        log.warn("sendToUser: unexpected error sending to userId={} sessionId={} err={}", userId, sessionRef.getId(), sendErr.getMessage(), sendErr);
+                        try { sessionRef.close(); } catch (Exception ignore) {}
+                        try { unregisterSession(userId, sessionRef); } catch (Exception ignore2) {}
                     }
                 });
             } catch (RejectedExecutionException rej) {

@@ -84,6 +84,7 @@ public class SecurityConfig {
                                 "/swagger-ui-dist/**",
                                 "/swagger-resources/**",
                                 "/api/test/whoami"
+/*                                "/api/chat/sessions/list"*/
                         ).permitAll()
 
                         // 其它公开资源
