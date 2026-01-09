@@ -33,10 +33,10 @@ public class ChatMessageController {
     private final ChatMessageService chatMessageService;
     private final AttachmentService attachmentService;
 
-    @Operation(summary = "获取 presign（聊天）", description = "生成 presigned PUT URL，供前端上传用户头像")
+    @Operation(summary = "获取 presign（聊天上传文件）", description = "生成 presigned PUT URL，供前端上传用户文件")
     @PostMapping("/presign")
     public ResponseEntity<?> presign(@RequestBody PresignRequestDTO req, @CurrentUser Long userId) {
-        String storagePath = "/userAvatar/" + userId + "/"+ LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        String storagePath = "/chatFile/" + userId + "/"+ LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
         log.info("presign request storagePath={} originalFilename={} mimeType={} uploadedBy={}",
                 storagePath, req.getOriginalFilename(), req.getMimeType(), userId);
         try {

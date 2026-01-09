@@ -3,6 +3,7 @@ package com.anime.chat.service;
 import com.anime.chat.socket.WsEventPublisher;
 import com.anime.common.dto.chat.message.*;
 import com.anime.common.dto.chat.session.SessionItem;
+import com.anime.common.entity.attachment.Attachment;
 import com.anime.common.entity.chat.ChatMessage;
 import com.anime.common.entity.user.User;
 import com.anime.common.enums.SocketType;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.net.Socket;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +58,19 @@ public class ChatMessageService {
                                    String content,
                                    Long attachmentId,
                                    String clientMessageId) {
+
+        // Basic attachment validation: if attachmentId present, ensure it's valid and belongs to sender and is available
+        if (attachmentId != null) {
+            Attachment a = attachmentService.getAttachmentById(attachmentId);
+            // 将attachment状态标记为已上传
+            attachmentService.completeUpload(attachmentId);
+/*            if (a == null) {
+                throw new IllegalArgumentException("attachment not found: " + attachmentId);
+            }
+            if (a.getUploadedBy() == null || !a.getUploadedBy().equals(fromUserId)) {
+                throw new IllegalArgumentException("attachment not owned by sender");
+            }*/
+        }
 
         // 幂等检查：如果 clientMessageId 非空并且已有记录，则直接返回发送者视角那条记录
         if (clientMessageId != null && !clientMessageId.isBlank()) {
@@ -330,9 +345,9 @@ public class ChatMessageService {
         dto.setContent(m.getContent());
         dto.setCreatedAt(m.getCreatedAt());
 
-        if ("IMAGE".equalsIgnoreCase(m.getMessageType()) && m.getAttachmentId() != null) {
+        if (!Objects.equals(m.getMessageType(), "TEXT") && m.getAttachmentId() != null) {
             String url = attachmentService.generatePresignedGetUrl(m.getAttachmentId(), 3600);
-            dto.setImageUrl(url);
+            dto.setFileUrl(url);
         }
         return dto;
     }

@@ -27,6 +27,8 @@ import java.util.stream.Collectors;
  * 修改说明：
  * - 即便两位用户之间从未发送过消息（或所有消息均被软删除），仍然会在会话列表中显示该好友会话项。
  * - 同理：用户所在的群聊会话也会显示，即使群内没有可见消息。
+ * - 新增：为每个单聊会话填充好友在线状态（通过 PresenceService）。
+ *         群聊会话始终标记为 online。
  */
 @Slf4j
 @Service
@@ -39,6 +41,7 @@ public class ChatSessionService {
     private final UserFriendMapper userFriendMapper;
     private final UserMapper userMapper;
     private final AttachmentService attachmentService;
+    private final PresenceService presenceService;
 
     public ListSessionsResponse listSessions(Long currentUserId) {
         if (currentUserId == null) {
@@ -51,7 +54,7 @@ public class ChatSessionService {
         List<ChatMessage> privateMsgs = chatMessageMapper.listAllPrivateMessagesForUser(currentUserId);
         Map<Long, ChatMessage> latestPrivateByFriend = groupLatestPrivateByFriend(privateMsgs, currentUserId);
 
-        // 1.1 计算每个好友的未读数（当前用户作为��收方）
+        // 1.1 计算每个好友的未读数（当前用户作为接收方）
         Map<Long, Long> unreadCountMap = buildUnreadCountMap(currentUserId);
 
         // 2. 群聊相关：获取所有群消息（用于取已存在群会话的最新消息）
@@ -85,6 +88,16 @@ public class ChatSessionService {
                     item.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarAttId, 3600));
                 }
             }
+
+            // 在线状态由 PresenceService 提供（若未注入或异常则默认 false）
+            boolean online = false;
+            try {
+                online = presenceService.isOnline(friendId);
+            } catch (Exception e) {
+                log.debug("listSessions: presenceService.isOnline failed for {}: {}", friendId, e.getMessage());
+            }
+            item.setOnline(online);
+
             result.add(item);
         }
 
@@ -116,6 +129,15 @@ public class ChatSessionService {
                         item.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarAttId, 3600));
                     }
                 }
+
+                boolean online = false;
+                try {
+                    online = presenceService.isOnline(friendId);
+                } catch (Exception e) {
+                    log.debug("listSessions: presenceService.isOnline failed for {}: {}", friendId, e.getMessage());
+                }
+                item.setOnline(online);
+
                 result.add(item);
             }
         }
@@ -145,6 +167,10 @@ public class ChatSessionService {
                     item.setTitle(group.getName());
                 }
                 item.setAvatarUrl(null);
+
+                // 群聊默认在线
+                item.setOnline(true);
+
                 result.add(item);
             }
         }
@@ -183,6 +209,10 @@ public class ChatSessionService {
                     ChatGroup g = missingGroupMap.get(gid);
                     if (g != null) item.setTitle(g.getName());
                     item.setAvatarUrl(null);
+
+                    // 群聊默认在线
+                    item.setOnline(true);
+
                     result.add(item);
                 }
             }
@@ -226,6 +256,14 @@ public class ChatSessionService {
             }
         }
 
+        boolean online = false;
+        try {
+            online = presenceService.isOnline(friendId);
+        } catch (Exception e) {
+            log.debug("buildPrivateSessionItem: presenceService.isOnline failed for {}: {}", friendId, e.getMessage());
+        }
+        item.setOnline(online);
+
         return item;
     }
 
@@ -251,6 +289,9 @@ public class ChatSessionService {
         if (group != null) {
             item.setTitle(group.getName());
         }
+
+        // 群聊默认 online
+        item.setOnline(true);
 
         return item;
     }

@@ -72,13 +72,14 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             WebSocketEnvelope<SendMessageRequest> env =
                     objectMapper.readValue(payload,
                             objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, SendMessageRequest.class));
-            handleSendMessage(session, userId, env.getPayload());
+
+            handleSendMessage(userId, env.getPayload());
         } else {
             log.debug("WS unknown type: {}", envelope.getType());
         }
     }
 
-    private void handleSendMessage(WebSocketSession session, Long fromUserId, SendMessageRequest req) {
+    private void handleSendMessage(Long fromUserId, SendMessageRequest req) {
         try {
             // 1. basic validation
             String convType = req.getConversationType();
@@ -154,8 +155,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 respForSender.setMessageType(saved.getMessageType());
                 respForSender.setContent(saved.getContent());
                 respForSender.setCreatedAt(saved.getCreatedAt());
-                if ("IMAGE".equalsIgnoreCase(saved.getMessageType()) && saved.getAttachmentId() != null) {
-                    respForSender.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                if (saved.getAttachmentId() != null) {
+                    try {
+                        respForSender.setFileUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                    } catch (Exception ex) {
+                        log.warn("failed to generate presigned url for attachment {}: {}", saved.getAttachmentId(), ex.getMessage());
+                    }
                 }
 
                 WebSocketEnvelope<NewMessageResponse> envSender = new WebSocketEnvelope<>();
@@ -174,8 +179,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 respForReceiver.setMessageType(saved.getMessageType());
                 respForReceiver.setContent(saved.getContent());
                 respForReceiver.setCreatedAt(saved.getCreatedAt());
-                if ("IMAGE".equalsIgnoreCase(saved.getMessageType()) && saved.getAttachmentId() != null) {
-                    respForReceiver.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                if (saved.getAttachmentId() != null) {
+                    try {
+                        respForReceiver.setFileUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                    } catch (Exception ex) {
+                        log.error("failed to generate presigned url for attachment {}: {}", saved.getAttachmentId(), ex.getMessage());
+                    }
                 }
 
                 WebSocketEnvelope<NewMessageResponse> envReceiver = new WebSocketEnvelope<>();
@@ -200,8 +209,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 baseResp.setMessageType(saved.getMessageType());
                 baseResp.setContent(saved.getContent());
                 baseResp.setCreatedAt(saved.getCreatedAt());
-                if ("IMAGE".equalsIgnoreCase(saved.getMessageType()) && saved.getAttachmentId() != null) {
-                    baseResp.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                if (saved.getAttachmentId() != null) {
+                    try {
+                        baseResp.setFileUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                    } catch (Exception ex) {
+                        log.warn("failed to generate presigned url for attachment {}: {}", saved.getAttachmentId(), ex.getMessage());
+                    }
                 }
 
                 sendToGroup(saved.getGroupId(), baseResp);
@@ -231,7 +244,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 respForUser.setMessageType(baseResp.getMessageType());
                 respForUser.setContent(baseResp.getContent());
                 respForUser.setCreatedAt(baseResp.getCreatedAt());
-                respForUser.setImageUrl(baseResp.getImageUrl());
+                respForUser.setFileUrl(baseResp.getFileUrl());
 
                 WebSocketEnvelope<NewMessageResponse> out = new WebSocketEnvelope<>();
                 out.setType("NEW_MESSAGE");

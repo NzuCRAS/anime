@@ -36,7 +36,7 @@ public class ChatMessageDTO {
     private Long groupId;
 
     /**
-     * 消息类型：TEXT / IMAGE
+     * 消息类型：TEXT / IMAGE / 其他
      */
     private String messageType;
 
@@ -46,9 +46,9 @@ public class ChatMessageDTO {
     private String content;
 
     /**
-     * 图片 URL（IMAGE 消息）
+     * 文件 URL（非文本消息）
      */
-    private String imageUrl;
+    private String fileUrl;
 
     /**
      * 发送时间
