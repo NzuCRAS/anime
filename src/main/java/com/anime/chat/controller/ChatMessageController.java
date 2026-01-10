@@ -52,11 +52,10 @@ public class ChatMessageController {
     /**
      * 获取与某好友的历史私聊消息
      */
-    @PostMapping("/private")
+    @PostMapping("/private/getMessage")
     public Result<ListPrivateMessagesResponse> listPrivateMessages(
             @RequestBody ListPrivateMessagesRequest request,
             @CurrentUser Long userId) {
-
         try {
             ListPrivateMessagesResponse resp = chatMessageService.listPrivateMessages(request, userId);
             return Result.success(resp);
@@ -70,7 +69,7 @@ public class ChatMessageController {
     /**
      * 获取某个群的历史群聊消息
      */
-    @PostMapping("/group")
+    @PostMapping("/group/getMessage")
     public Result<ListGroupMessagesResponse> listGroupMessages(
             @RequestBody ListGroupMessagesRequest request,
             @CurrentUser Long userId) {
