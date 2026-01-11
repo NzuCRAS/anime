@@ -36,6 +36,6 @@ public interface UserMapper extends BaseMapper<User> {
     /**
      * 更新用户的个人签名字段
      */
-    @Update("UPDATE users SET personal_signature = #{signature}, updated_at = CURRENT_TIMESTAMP WHERE id = #{userId}")
+    @Update("UPDATE users SET personal_signature = #{signature} WHERE id = #{userId}")
     int updatePersonalSignatureById(@Param("userId") Long userId, @Param("signature") String signature);
 }
