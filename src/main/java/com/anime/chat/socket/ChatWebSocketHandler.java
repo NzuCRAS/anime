@@ -266,7 +266,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 TextMessage outMsgReceiver = new TextMessage(jsonReceiver);
 
                 // send to sender
-/*                sessionManager.sendToUser(fromUserId, outMsgSender);*/
+                sessionManager.sendToUser(fromUserId, outMsgReceiver);
                 // send to receiver (if different)
                 if (!toUserId.equals(fromUserId)) {
                     sessionManager.sendToUser(toUserId, outMsgReceiver);

@@ -128,7 +128,7 @@ public class ChatMessageService {
                 chatMessageMapper.insert(receiverView);
 
                 // 3) 发送会话更新通知（SESSION_UPDATED）
-                notifySessionNewMessageForPrivate(fromUserId, toUserId);
+/*                notifySessionNewMessageForPrivate(fromUserId, toUserId);*/
 
                 // 返回发送者视角记录（WS、前端一般用这一条）
                 return senderView;
