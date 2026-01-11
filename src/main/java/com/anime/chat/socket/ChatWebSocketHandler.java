@@ -218,7 +218,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             // 3. build and send messages: ensure each recipient receives a payload whose toUserId equals that recipient
             if ("PRIVATE".equalsIgnoreCase(convType)) {
                 // Sender's view payload
-                NewMessageResponse respForSender = new NewMessageResponse();
+/*                NewMessageResponse respForSender = new NewMessageResponse();
                 respForSender.setId(saved.getId());
                 respForSender.setConversationType(saved.getConversationType());
                 respForSender.setFromUserId(saved.getFromUserId());
@@ -239,7 +239,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 envSender.setType("NEW_MESSAGE");
                 envSender.setPayload(respForSender);
                 String jsonSender = objectMapper.writeValueAsString(envSender);
-                TextMessage outMsgSender = new TextMessage(jsonSender);
+                TextMessage outMsgSender = new TextMessage(jsonSender);*/
 
                 // Receiver's view payload
                 NewMessageResponse respForReceiver = new NewMessageResponse();
@@ -266,7 +266,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 TextMessage outMsgReceiver = new TextMessage(jsonReceiver);
 
                 // send to sender
-                sessionManager.sendToUser(fromUserId, outMsgSender);
+/*                sessionManager.sendToUser(fromUserId, outMsgSender);*/
                 // send to receiver (if different)
                 if (!toUserId.equals(fromUserId)) {
                     sessionManager.sendToUser(toUserId, outMsgReceiver);
