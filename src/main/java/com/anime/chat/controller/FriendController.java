@@ -90,13 +90,13 @@ public class FriendController {
     }
 
     /**
-     * 精确id搜索好友（严格匹配）
+     * 精确id搜索好友（严格匹配） - 返回同时包含与当前用户关系的字段
      */
     @PostMapping("/search")
-    public Result<SearchUserResponse> searchUser(@RequestBody SearchUserRequest req) {
+    public Result<SearchUserResponse> searchUser(@RequestBody SearchUserRequest req,
+                                                 @CurrentUser Long userId) {
         try {
-            SearchUserResponse resp = friendService.searchById(req);
-            System.out.println(resp.toString());
+            SearchUserResponse resp = friendService.searchById(req, userId);
             return Result.success(resp);
         } catch (Exception e) {
             log.error("searchUser error", e);

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>LAN P2P Video Call Test</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body { font-family: system-ui, -apple-system, Roboto, "Segoe UI", Arial; padding: 16px; }
+        .col { display:flex; gap:12px; }
+        video { width: 360px; height: 270px; background:#000; }
+        #log { white-space: pre-wrap; background:#111; color:#eee; padding:8px; height:240px; overflow:auto; font-family: monospace; }
+        input, button { padding:6px 8px; margin:4px 0; }
+        .controls { margin-bottom:12px; }
+        .badge { display:inline-block; padding:4px 8px; background:#eef; border-radius:4px; margin-left:8px; }
+    </style>
+</head>
+<body>
+<h2>LAN P2P Video Call Test</h2>
+
+<div class="controls">
+    <label>Server base URL: <input id="serverUrl" value="https://localhost:8443" size="40"></label>
+    <label>WS path: <input id="wsPath" value="/ws/chat" size="18"></label>
+</div>
+
+<div class="controls">
+    <strong>Login</strong><br>
+    <label>Username: <input id="username" value="1"></label>
+    <label>Password: <input id="password" value="1" type="password"></label>
+    <button id="btnLogin">Login</button>
+    <span id="loginStatus" class="badge">not logged</span>
+</div>
+
+<div class="controls">
+    <button id="btnConnectWs" disabled>Connect WebSocket</button>
+    <span id="wsStatus" class="badge">WS: closed</span>
+</div>
+
+<hr>
+
+<div class="controls">
+    <strong>Local Media</strong><br>
+    <button id="btnStartLocal" disabled>Start Local Camera</button>
+    <button id="btnStopLocal" disabled>Stop Local</button>
+    <label>Target UserId: <input id="targetUserId" value="2" size="6"></label>
+    <button id="btnCall" disabled>Call</button>
+    <button id="btnHangup" disabled>Hangup</button>
+</div>
+
+<div class="col">
+    <div>
+        <div><strong>Local</strong></div>
+        <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+    <div>
+        <div><strong>Remote</strong></div>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+</div>
+
+<hr>
+
+<div>
+    <strong>Log</strong>
+    <div id="log"></div>
+</div>
+
+<script>
+    /*
+      video-call-test.html
+      - Use this page in a browser on machines within the same LAN.
+      - It uses the existing WebSocket signaling implemented on the server (CALL_INVITE / CALL_ANSWER / CALL_ICE / CALL_HANGUP).
+      - Flow:
+        * Login -> Connect WS -> Start local camera -> Call targetUserId
+        * Caller sends CALL_INVITE (payload: { targetUserId, sdp })
+        * Callee receives CALL_INVITE, accepts -> sends CALL_ANSWER (payload: { callId, sdp })
+        * Both sides exchange CALL_ICE (payload: { callId, candidate, sdpMid, sdpMLineIndex })
+        * Hangup sends CALL_HANGUP (payload: { callId })
+      - Notes:
+        * Browser must trust the server TLS certificate for wss:// to work. If self-signed, open https://localhost:8443 in browser first and accept the certificate.
+        * Recommended to serve this page from a small static server (python -m http.server) or open directly and allow cross-origin fetch if backend allows CORS.
+    */
+
+    (() => {
+        const $ = id => document.getElementById(id);
+        const logEl = $('log');
+        function log(...args) { logEl.textContent += args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ') + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+        let accessToken = null;
+        let ws = null;
+        let pc = null;
+        let localStream = null;
+        let callId = null;
+        let pendingInvite = null; // for callee: store incoming invite { callId, fromUserId, sdp, metadata }
+
+        // ICE servers for LAN usually unnecessary; you can add stun if needed
+        const pcConfig = { iceServers: [] };
+
+        // UI elements
+        const btnLogin = $('btnLogin');
+        const btnConnectWs = $('btnConnectWs');
+        const btnStartLocal = $('btnStartLocal');
+        const btnStopLocal = $('btnStopLocal');
+        const btnCall = $('btnCall');
+        const btnHangup = $('btnHangup');
+        const btnLabelLogin = $('loginStatus');
+        const wsStatus = $('wsStatus');
+
+        function setLoginState(ok, username) {
+            btnLabelLogin.textContent = ok ? `logged as ${username}` : 'not logged';
+            btnConnectWs.disabled = !ok;
+            btnStartLocal.disabled = !ok;
+        }
+
+        function setWsState(state) {
+            wsStatus.textContent = 'WS: ' + state;
+            const open = state === 'open';
+            btnCall.disabled = !open || !localStream;
+        }
+
+        async function doLogin() {
+            const server = $('serverUrl').value.replace(/\/+$/, '');
+            const url = server + '/api/user/login';
+            const username = $('username').value;
+            const password = $('password').value;
+            log('login ->', username, url);
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernameOrEmail: username, password })
+                });
+                const body = await res.json().catch(() => null);
+                if (!res.ok) {
+                    log('login failed', res.status, body);
+                    setLoginState(false);
+                    return;
+                }
+                // server should return New-Access-Token header; browsers expose it only if server sets Access-Control-Expose-Headers
+                const token = res.headers.get('New-Access-Token') || res.headers.get('new-access-token');
+                accessToken = token;
+                log('login success, token=', !!accessToken, body);
+                setLoginState(true, username);
+            } catch (e) {
+                log('login error', e && e.message ? e.message : e);
+                setLoginState(false);
+            }
+        }
+
+        function connectWebSocket() {
+            if (!accessToken) {
+                log('no access token, cannot connect WS');
+                return;
+            }
+            const server = $('serverUrl').value.replace(/\/+$/, '');
+            const path = $('wsPath').value || '/ws/chat';
+            const wsUrl = (() => {
+                // use wss if server uses https, ws if http
+                const isHttps = server.startsWith('https://');
+                const host = server.replace(/^https?:\/\//, '');
+                return (isHttps ? 'wss://' : 'ws://') + host + path + '?token=' + encodeURIComponent(accessToken);
+            })();
+
+            log('connecting ws to', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('WS open');
+                setWsState('open');
+            };
+            ws.onmessage = ev => {
+                try {
+                    const env = JSON.parse(ev.data);
+                    log('WS recv', env.type, env.payload);
+                    handleSignal(env);
+                } catch (e) {
+                    log('WS parse error', e);
+                }
+            };
+            ws.onclose = ev => {
+                log('WS closed', ev.code, ev.reason);
+                setWsState('closed');
+            };
+            ws.onerror = err => {
+                log('WS error', err);
+            };
+        }
+
+        // Signaling -> handle server forwarded events
+        function handleSignal(env) {
+            const t = env.type;
+            const p = env.payload || {};
+            if (t === 'CALL_INVITE') {
+                // incoming call: { callId, fromUserId, sdp, metadata }
+                pendingInvite = p;
+                log('Incoming call from', p.fromUserId, 'callId', p.callId);
+                // Prompt user: simple confirm for test
+                const accept = confirm(`Incoming call from ${p.fromUserId}. Accept?`);
+                if (accept) acceptCall();
+                else rejectCall();
+            } else if (t === 'CALL_OUTGOING') {
+                // server acknowledged outgoing, payload: { callId, targetUserId }
+                callId = p.callId;
+                log('Outgoing callId assigned:', callId);
+            } else if (t === 'CALL_ANSWER') {
+                // { callId, fromUserId, sdp }
+                log('Received CALL_ANSWER');
+                if (pc && p.sdp) {
+                    pc.setRemoteDescription(new RTCSessionDescription(p.sdp)).catch(e => log('setRemoteDescription answer error', e));
+                }
+            } else if (t === 'CALL_ICE') {
+                // { callId, fromUserId, candidate, sdpMid, sdpMLineIndex }
+                if (!pc) { log('No peerconnection yet to add ICE'); return; }
+                const candObj = {
+                    candidate: p.candidate,
+                    sdpMid: p.sdpMid,
+                    sdpMLineIndex: p.sdpMLineIndex
+                };
+                pc.addIceCandidate(new RTCIceCandidate(candObj)).catch(e => log('addIceCandidate failed', e));
+                log('added remote ICE candidate');
+            } else if (t === 'CALL_HANGUP' || t === 'CALL_REJECT' || t === 'CALL_ENDED') {
+                log('Call ended / rejected by peer', t, p.reason);
+                cleanupCall();
+            } else {
+                // other events (presence, NEW_PRIVATE_MESSAGE etc.)
+                log('WS event', t, p);
+            }
+        }
+
+        // local media control
+        async function startLocal() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                $('localVideo').srcObject = localStream;
+                log('local media started');
+                btnStopLocal.disabled = false;
+                btnStartLocal.disabled = true;
+                btnCall.disabled = !(!ws || ws.readyState !== WebSocket.OPEN) ? false : true;
+                // enable call if ws open
+                if (ws && ws.readyState === WebSocket.OPEN) btnCall.disabled = false;
+            } catch (e) {
+                log('getUserMedia failed', e);
+            }
+        }
+
+        function stopLocal() {
+            if (localStream) {
+                for (const t of localStream.getTracks()) t.stop();
+                localStream = null;
+                $('localVideo').srcObject = null;
+                log('local media stopped');
+                btnStopLocal.disabled = true;
+                btnStartLocal.disabled = false;
+                btnCall.disabled = true;
+            }
+        }
+
+        // create pc and wire handlers; role: "caller" or "callee"
+        function createPeerConnection(role) {
+            pc = new RTCPeerConnection(pcConfig);
+            pc.onicecandidate = (ev) => {
+                if (ev.candidate && callId) {
+                    const payload = {
+                        callId,
+                        candidate: ev.candidate.candidate,
+                        sdpMid: ev.candidate.sdpMid,
+                        sdpMLineIndex: ev.candidate.sdpMLineIndex
+                    };
+                    sendSignal('CALL_ICE', payload);
+                    log('sent local ICE');
+                }
+            };
+            pc.ontrack = (ev) => {
+                log('remote track received', ev.streams);
+                $('remoteVideo').srcObject = ev.streams[0];
+            };
+            // add local tracks
+            if (localStream) {
+                for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+            } else {
+                log('No local stream when creating pc');
+            }
+            return pc;
+        }
+
+        async function callTarget() {
+            const target = Number($('targetUserId').value);
+            if (!target) { alert('target user id required'); return; }
+            if (!ws || ws.readyState !== WebSocket.OPEN) { alert('WS not connected'); return; }
+            if (!localStream) { alert('Start local camera first'); return; }
+
+            // create pc and offer
+            createPeerConnection('caller');
+
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // send CALL_INVITE with targetUserId + sdp
+                const payload = { targetUserId: target, sdp: offer }; // offer is RTCSessionDescription-like object
+                sendSignal('CALL_INVITE', payload);
+
+                log('CALL_INVITE sent to', target, 'waiting for CALL_OUTGOING/CALL_ANSWER...');
+                btnHangup.disabled = false;
+            } catch (e) {
+                log('createOffer error', e);
+            }
+        }
+
+        async function acceptCall() {
+            if (!pendingInvite) { log('no pending invite'); return; }
+            // get callId & offer
+            callId = pendingInvite.callId;
+            const offer = pendingInvite.sdp;
+            log('accepting callId', callId, 'from', pendingInvite.fromUserId);
+
+            createPeerConnection('callee');
+
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                // send CALL_ANSWER with callId and sdp
+                sendSignal('CALL_ANSWER', { callId, sdp: answer });
+
+                pendingInvite = null;
+                btnHangup.disabled = false;
+            } catch (e) {
+                log('acceptCall error', e);
+            }
+        }
+
+        function rejectCall() {
+            if (!pendingInvite) return;
+            const cid = pendingInvite.callId;
+            sendSignal('CALL_REJECT', { callId: cid, reason: 'user_reject' });
+            pendingInvite = null;
+            log('rejected call', cid);
+        }
+
+        function hangup() {
+            if (!callId) { log('no active callId'); cleanupCall(); return; }
+            sendSignal('CALL_HANGUP', { callId, reason: 'user_hangup' });
+            cleanupCall();
+        }
+
+        function cleanupCall() {
+            if (pc) {
+                try { pc.getSenders().forEach(s => s.track && s.track.stop()); } catch(_) {}
+                try { pc.close(); } catch(_) {}
+                pc = null;
+            }
+            callId = null;
+            $('remoteVideo').srcObject = null;
+            btnHangup.disabled = true;
+            log('call cleaned up');
+        }
+
+        function sendSignal(type, payload) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) { log('WS not open'); return; }
+            const env = { type, payload };
+            ws.send(JSON.stringify(env));
+            log('sent', type, payload);
+        }
+
+        // UI bindings
+        btnLogin.onclick = doLogin;
+        btnConnectWs.onclick = () => {
+            if (!accessToken) { alert('login first'); return; }
+            connectWebSocket();
+        };
+        btnStartLocal.onclick = startLocal;
+        btnStopLocal.onclick = stopLocal;
+        btnCall.onclick = callTarget;
+        btnHangup.onclick = hangup;
+
+        // initial UI state
+        setLoginState(false);
+        setWsState('closed');
+        btnStartLocal.disabled = false;
+
+        // helper: trust server cert (if browsing https self-signed, accept cert via browser by opening https://host first)
+        log('Page loaded. To use wss:// with self-signed cert you may need to visit the server root https://localhost:8443 and accept the certificate first.');
+    })();
+</script>
+</body>
+</html>

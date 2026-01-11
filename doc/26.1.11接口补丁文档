@@ -1,0 +1,226 @@
+上传个性签名接口
+
+/api/user/signature
+
+前端传入PersonalSignatureDTO：
+{
+    String personalSignature;
+}
+
+前端请求示例:
+{ "personalSignature": "这是我的新签名" }
+
+后端返回<Result<String>,其中String表示个性签名内容
+
+--------------------------------------------------
+
+拉取私聊历史记录接口
+
+/api/chat/messages/private/getMessage
+
+前端传入ListPrivateMessageRequest：
+{
+    /**
+     * 好友用户ID
+     */
+    private Long friendId;
+
+    /**
+     * 分页页码 (每页50条消息)
+     */
+    private Integer page;
+
+    // page代表传入第几页，从0开始，每次传入50条消息，如果page=null则默认传入最新50条(page=0即传入最新50条)
+}
+
+前端请求示例:
+{
+    "friendId": 123456789,
+    "page": 0
+}
+
+后端返回<Result<List<PrivateMessageDTO>>，其中PrivateMessageDTO：
+
+{
+    /**
+     * 消息ID
+     */
+    private Long id;
+
+    /**
+     * 会话类型：PRIVATE / GROUP
+     */
+    private String conversationType;
+
+    /**
+     * 发送者ID
+     */
+    private Long fromUserId;
+
+    /**
+     * 接收者ID（仅在 PRIVATE 会话中使用）
+     */
+    private Long toUserId;
+
+    /**
+     * 群ID（仅在 GROUP 会话中使用）
+     */
+    private Long groupId;
+
+    /**
+     * 消息类型：TEXT / IMAGE / 其他
+     */
+    private String messageType;
+
+    /**
+     * 文本内容（TEXT 消息）
+     */
+    private String content;
+
+    /**
+     * 文件 URL（非文本消息）
+     */
+    private String fileUrl;
+
+    // 这里的fileUrl是一个getUrl,可以用来下载图片或文件
+
+    /**
+     * 发送时间
+     */
+    private LocalDateTime createdAt;
+}
+
+-----------------------------------------------------------------------------
+
+搜索好友dto修改如下：
+
+FriendSearchItem {
+    private Long id;
+    private String username;
+    private String avatarUrl;
+    private String personalSignature;
+    private FriendStatus status; // e.g., "ALREADY_FRIENDS", "NOT_FRIENDS", "PENDING_REQUEST"
+}
+
+新增一个status表示当前用户和该用户之间的关系
+
+"ALREADY_FRIENDS" 表示已经是好友
+"NOT_FRIENDS" 表示不是好友
+"PENDING_REQUEST" 表示两者之间有好友申请未被处理
+
+----------------------------------------------------------------------------
+
+聊天中上传文件接口
+
+这里dto和流程都跟之前上传图片的接口是一样的
+
+/api/chat/messages/presign
+
+前端传入PresignRequestDTO：
+{
+    @Schema(description = "文件原始名（例如 test.jpg）", example = "test.jpg")
+    private String originalFilename;
+
+    @Schema(description = "MIME 类型（例如 image/jpeg）", example = "image/jpeg")
+    private String mimeType;
+}
+
+后端返回PresignResponseDTO
+{
+        /**
+         * attachment数据库里的主键
+         * 前端需要暂时保存,后面需要传回给后端
+         */
+        private Long attachmentId;
+
+        /**
+         * 给前端直接使用的文件存储地址，直接put即可
+         */
+        private String putUrl;
+
+        /**
+         * 简化为 Map<String, String> 便于前端直接设置 header。
+         * 注意：部分签名需要多个同名 header（rare），此处使用逗号拼接。
+         * 服务器在生成 presigned PUT 时同时返回给前端的一组 HTTP header（key→value）
+         * 在签名时这些 header 可能被包含到签名里，上传时必须完全匹配签名时的值，否则对象存储会拒绝请求
+         * 用来告诉前端在 PUT 上传时需要带哪些 header，且这些 header 很可能被签名绑定
+         */
+        private Map<String, String> putHeaders;
+
+        /**
+         * 用于预览或者直接下载的url
+         */
+        private String getUrl;
+}
+
+后续的attachmentId放到聊天的消息中通过websocket传过来,后端进行持久化
+
+-----------------------------------------------------------------------------
+
+在拉取好友列表的接口返回值中增加一个online字段
+
+返回ListSessionsResponse
+
+{
+    /**
+     * 当前用户所有会话（单聊 + 群聊），
+     * 已按 lastMessageTime 从新到旧排序
+     */
+    private List<SessionItem> sessions;
+}
+
+SessionItem
+
+{
+    /**
+     * 会话类型：PRIVATE 表示单聊；GROUP 表示群聊
+     */
+    private String sessionType;
+
+    /**
+     * 会话唯一 ID：
+     * - 单聊：建议用对方 userId
+     * - 群聊：用 groupId
+     */
+    private Long sessionTargetId;
+
+    /**
+     * 会话显示标题：
+     * - 单聊：好友昵称 / 用户名
+     * - 群聊：群名称
+     */
+    private String title;
+
+    /**
+     * 最后一条消息的简要内容（截断后的前一部分）
+     */
+    private String lastMessagePreview;
+
+    /**
+     * 最后一条消息的发送时间
+     */
+    private LocalDateTime lastMessageTime;
+
+    /**
+     * 当前会话的未读消息数量
+     */
+    private Integer unreadCount;
+
+    /**
+     * 该用户的个性签名（适配群描述）
+     */
+    private String signature;
+
+    /**
+     * 会话头像：
+     * - 单聊：对方用户头像 URL
+     * - 群聊：群头像 URL（可选）
+     */
+    private String avatarUrl;
+
+    /**
+     * 用户是否在线
+     */
+    private boolean isOnline;
+}
+

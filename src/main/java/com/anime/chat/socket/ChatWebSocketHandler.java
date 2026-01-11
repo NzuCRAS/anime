@@ -1,6 +1,11 @@
 package com.anime.chat.socket;
 
+import com.anime.chat.service.CallService;
 import com.anime.chat.service.ChatMessageService;
+import com.anime.common.dto.chat.call.CallAnswerRequest;
+import com.anime.common.dto.chat.call.CallControlDto;
+import com.anime.common.dto.chat.call.CallInviteRequest;
+import com.anime.common.dto.chat.call.IceCandidateDto;
 import com.anime.common.dto.chat.socket.NewMessageResponse;
 import com.anime.common.dto.chat.socket.SendMessageRequest;
 import com.anime.common.dto.chat.socket.WebSocketEnvelope;
@@ -34,6 +39,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatGroupMemberMapper chatGroupMemberMapper;
     private final ObjectMapper objectMapper;
     private final WebSocketSessionManager sessionManager;
+    private final CallService callService;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -67,15 +73,81 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        if ("SEND_MESSAGE".equalsIgnoreCase(envelope.getType())) {
-            // Because of type erasure we deserialize payload with explicit generic type
-            WebSocketEnvelope<SendMessageRequest> env =
-                    objectMapper.readValue(payload,
-                            objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, SendMessageRequest.class));
+        String type = envelope.getType();
+        try {
+            if ("SEND_MESSAGE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<SendMessageRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, SendMessageRequest.class));
+                handleSendMessage(userId, env.getPayload());
+                return;
+            }
 
-            handleSendMessage(userId, env.getPayload());
-        } else {
-            log.debug("WS unknown type: {}", envelope.getType());
+            // --- WebRTC signaling messages ---
+            if ("CALL_INVITE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallInviteRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallInviteRequest.class));
+                CallInviteRequest req = env.getPayload();
+                String callId = callService.createAndForwardInvite(userId, req);
+                // 如果 callId==null 表示拒绝（比如非好友或其它校验失败），给 caller 一个失败事件
+                if (callId == null) {
+                    sessionManager.sendToUser(userId, "CALL_FAILED", Map.of("reason", "target_unavailable_or_not_friend"));
+                } else {
+                    // 回传确认给 caller（可选）
+                    sessionManager.sendToUser(userId, "CALL_OUTGOING", Map.of("callId", callId, "targetUserId", req.getTargetUserId()));
+                }
+                return;
+            }
+
+            if ("CALL_ANSWER".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallAnswerRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallAnswerRequest.class));
+                CallAnswerRequest req = env.getPayload();
+                boolean ok = callService.handleAnswer(userId, req);
+                if (!ok) {
+                    sessionManager.sendToUser(userId, "CALL_FAILED", Map.of("reason", "invalid_call_or_not_allowed"));
+                }
+                return;
+            }
+
+            if ("CALL_ICE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<IceCandidateDto> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, IceCandidateDto.class));
+                IceCandidateDto c = env.getPayload();
+                boolean ok = callService.handleIce(userId, c);
+                if (!ok) {
+                    log.debug("Failed to forward ICE candidate for userId={} callId={}", userId, c == null ? null : c.getCallId());
+                }
+                return;
+            }
+
+            if ("CALL_HANGUP".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallControlDto> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallControlDto.class));
+                CallControlDto ctrl = env.getPayload();
+                callService.handleHangup(userId, ctrl, "CALL_HANGUP");
+                return;
+            }
+
+            if ("CALL_REJECT".equalsIgnoreCase(type) || "CALL_ACCEPT".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallControlDto> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallControlDto.class));
+                CallControlDto ctrl = env.getPayload();
+                String ev = type.equalsIgnoreCase("CALL_REJECT") ? "CALL_REJECT" : "CALL_ACCEPT";
+                callService.handleHangup(userId, ctrl, ev); // reuse hangup-like notification (will remove session)
+                return;
+            }
+
+            // 其他类型继续现有逻辑
+            log.debug("WS unknown type: {}", type);
+
+        } catch (Exception e) {
+            log.error("WS handleTextMessage error for type={} userId={}", type, userId, e);
         }
     }
 
@@ -196,7 +268,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 // send to sender
                 sessionManager.sendToUser(fromUserId, outMsgSender);
                 // send to receiver (if different)
-                if (toUserId != null && !toUserId.equals(fromUserId)) {
+                if (!toUserId.equals(fromUserId)) {
                     sessionManager.sendToUser(toUserId, outMsgReceiver);
                 }
             } else if ("GROUP".equalsIgnoreCase(convType)) {

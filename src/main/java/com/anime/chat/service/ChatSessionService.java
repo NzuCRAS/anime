@@ -388,6 +388,12 @@ public class ChatSessionService {
     private String buildPreview(String messageType, String content) {
         if ("IMAGE".equalsIgnoreCase(messageType)) {
             return "[图片]";
+        } else if ("FILE".equalsIgnoreCase(messageType)) {
+            return "[文件]";
+        } else if ("VIDEO".equalsIgnoreCase(messageType)) {
+            return "[视频]";
+        } else if ("AUDIO".equalsIgnoreCase(messageType)) {
+            return "[音频]";
         }
         if (content == null) return "";
         return content.length() <= 10 ? content : content.substring(0, 10) + "...";

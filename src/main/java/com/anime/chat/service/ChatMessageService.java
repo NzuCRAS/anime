@@ -235,7 +235,8 @@ public class ChatMessageService {
     public ListPrivateMessagesResponse listPrivateMessages(ListPrivateMessagesRequest request, Long currentUserId) {
         Long friendId = request.getFriendId();
         List<ChatMessage> list = chatMessageMapper.listPrivateMessages(currentUserId, friendId,
-                1000, 0); // 暂不分页，可以设一个最大数量
+                50, (request.getPage() > 0 ? request.getPage() : 0) * 50);
+        // 每次拉取50条信息
         List<ChatMessageDTO> dtos = list.stream().map(this::toDto).collect(Collectors.toList());
 
         ListPrivateMessagesResponse resp = new ListPrivateMessagesResponse();
@@ -332,7 +333,7 @@ public class ChatMessageService {
     }
 
     /**
-     * 将实体转换为历史消息 DTO，根据 attachmentId 生成 imageUrl
+     * 将实体转换为历史消息 DTO，根据 attachmentId 生成 fileUrl
      */
     private ChatMessageDTO toDto(ChatMessage m) {
         ChatMessageDTO dto = new ChatMessageDTO();
@@ -345,6 +346,7 @@ public class ChatMessageService {
         dto.setContent(m.getContent());
         dto.setCreatedAt(m.getCreatedAt());
 
+        // 如果有附件，生成预签名 URL
         if (!Objects.equals(m.getMessageType(), "TEXT") && m.getAttachmentId() != null) {
             String url = attachmentService.generatePresignedGetUrl(m.getAttachmentId(), 3600);
             dto.setFileUrl(url);
