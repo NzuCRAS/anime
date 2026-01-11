@@ -11,5 +11,6 @@ public class FriendRequestItem {
     private String fromUsername;
     private String fromAvatarUrl;
     private String message;
+    private String signature;
     private LocalDateTime createdAt;
 }

@@ -146,6 +146,8 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
 
     /**
      * 列出当前用户收到的好友请求（pending）
+     *
+     * 新增：把发起人的个性签名（signature）包含在返回项中
      */
     public ListFriendRequestsResponse listIncomingRequests(Long currentUserId) {
         List<UserFriendRequest> list = userFriendRequestMapper.listPendingForUser(currentUserId);
@@ -162,6 +164,9 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
                 }
                 it.setMessage(fr.getMessage());
                 it.setCreatedAt(fr.getCreatedAt());
+                // 新增：设置发起人的个性签名（signature）
+                String signature = userMapper.getPersonalSignatureById(fromUser.getId());
+                it.setSignature(signature);
             }
             return it;
         }).collect(Collectors.toList());
