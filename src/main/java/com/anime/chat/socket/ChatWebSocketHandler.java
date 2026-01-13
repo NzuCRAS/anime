@@ -2,6 +2,7 @@ package com.anime.chat.socket;
 
 import com.anime.chat.service.CallService;
 import com.anime.chat.service.ChatMessageService;
+import com.anime.chat.service.WhiteboardService;
 import com.anime.common.dto.chat.call.CallAnswerRequest;
 import com.anime.common.dto.chat.call.CallControlDto;
 import com.anime.common.dto.chat.call.CallInviteRequest;
@@ -9,6 +10,9 @@ import com.anime.common.dto.chat.call.IceCandidateDto;
 import com.anime.common.dto.chat.socket.NewMessageResponse;
 import com.anime.common.dto.chat.socket.SendMessageRequest;
 import com.anime.common.dto.chat.socket.WebSocketEnvelope;
+import com.anime.common.dto.chat.whiteboard.WhiteboardClearRequest;
+import com.anime.common.dto.chat.whiteboard.WhiteboardJoinRequest;
+import com.anime.common.dto.chat.whiteboard.WhiteboardStrokePart;
 import com.anime.common.entity.chat.ChatMessage;
 import com.anime.common.mapper.chat.ChatGroupMemberMapper;
 import com.anime.common.service.AttachmentService;
@@ -21,13 +25,18 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * WebSocket 处理器：负责接收消息、调用业务层、广播消息。
  *
- * 已修正：使用 WebSocketSessionManager 管理会话与发送，避免 handler 内直接维护并发集合。
- * 增强：在持久化成功后向发送方发送 ACK（包含 clientMessageId 与 serverMessageId），然后再投递 NEW_MESSAGE 给接收方。
+ * 白板部分（新方案）：
+ * - 使用会话级唯一白板（convId），不再使用 boardId
+ * - WHITEBOARD_OPEN（可选）：幂等初始化
+ * - WHITEBOARD_JOIN：加入 members 并返回 15 分钟窗口事件
+ * - WHITEBOARD_STROKE_PART：写入 Streams 并仅转发给 members
+ * - WHITEBOARD_CLEAR：写入清空事件并广播
  */
 @Slf4j
 @Component
@@ -40,6 +49,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final WebSocketSessionManager sessionManager;
     private final CallService callService;
+    private final WhiteboardService whiteboardService;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -90,11 +100,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                                 objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallInviteRequest.class));
                 CallInviteRequest req = env.getPayload();
                 String callId = callService.createAndForwardInvite(userId, req);
-                // 如果 callId==null 表示拒绝（比如非好友或其它校验失败），给 caller 一个失败事件
                 if (callId == null) {
                     sessionManager.sendToUser(userId, "CALL_FAILED", Map.of("reason", "target_unavailable_or_not_friend"));
                 } else {
-                    // 回传确认给 caller（可选）
                     sessionManager.sendToUser(userId, "CALL_OUTGOING", Map.of("callId", callId, "targetUserId", req.getTargetUserId()));
                 }
                 return;
@@ -139,7 +147,96 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                                 objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallControlDto.class));
                 CallControlDto ctrl = env.getPayload();
                 String ev = type.equalsIgnoreCase("CALL_REJECT") ? "CALL_REJECT" : "CALL_ACCEPT";
-                callService.handleHangup(userId, ctrl, ev); // reuse hangup-like notification (will remove session)
+                callService.handleHangup(userId, ctrl, ev);
+                return;
+            }
+
+            // --------------- whiteboard (new) ----------------
+
+            // 可选：OPEN（或把 WHITEBOARD_CREATE 当作 OPEN 别名）
+            if ("WHITEBOARD_OPEN".equalsIgnoreCase(type) || "WHITEBOARD_CREATE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardJoinRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardJoinRequest.class));
+                WhiteboardJoinRequest req = env.getPayload();
+                Long targetUserId = req.getTargetUserId();
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                } else {
+                    whiteboardService.openWhiteboardIfNeeded(userId, targetUserId);
+                    sessionManager.sendToUser(userId, "WHITEBOARD_OPENED", Map.of("targetUserId", targetUserId));
+                }
+                return;
+            }
+
+            // JOIN：加入并返回最近窗口事件
+            if ("WHITEBOARD_JOIN".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardJoinRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardJoinRequest.class));
+                WhiteboardJoinRequest req = env.getPayload();
+                Long targetUserId = req.getTargetUserId();
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                    return;
+                }
+                whiteboardService.openWhiteboardIfNeeded(userId, targetUserId);
+                List<Map<String, Object>> events = whiteboardService.joinAndLoadWindow(userId, targetUserId);
+                sessionManager.sendToUser(userId, "WHITEBOARD_INIT", Map.of("events", events));
+                return;
+            }
+
+            // 笔画分片：写入并转发给 members
+            if ("WHITEBOARD_STROKE_PART".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardStrokePart> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardStrokePart.class));
+                WhiteboardStrokePart p = env.getPayload();
+                Long targetUserId = p.getTargetUserId(); // 需要前端传 targetUserId
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                    return;
+                }
+
+                Map<String, Object> ev = new HashMap<>();
+                ev.put("type", "WHITEBOARD_STROKE_PART");
+                ev.put("strokeId", p.getStrokeId());
+                ev.put("tool", p.getTool());
+                ev.put("color", p.getColor());
+                ev.put("width", p.getWidth());
+                ev.put("points", p.getPoints());
+                ev.put("isEnd", p.getIsEnd());
+                ev.put("ts", p.getTs() == null ? System.currentTimeMillis() : p.getTs());
+
+                whiteboardService.appendStrokeAndForward(userId, targetUserId, ev);
+                return;
+            }
+
+            // 清空
+            if ("WHITEBOARD_CLEAR".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardClearRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardClearRequest.class));
+                WhiteboardClearRequest r = env.getPayload();
+                Long targetUserId = r.getTargetUserId(); // 需要前端传 targetUserId
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                    return;
+                }
+                whiteboardService.clearAndBroadcast(userId, targetUserId, r.getTs());
+                return;
+            }
+
+            // 可选：离开（前端关闭 overlay 时可发送）
+            if ("WHITEBOARD_LEAVE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardJoinRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardJoinRequest.class));
+                WhiteboardJoinRequest req = env.getPayload();
+                Long targetUserId = req.getTargetUserId();
+                if (targetUserId != null) {
+                    whiteboardService.leave(userId, targetUserId);
+                }
                 return;
             }
 
@@ -181,7 +278,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             }
 
             // 2. save message via service (service handles persistence and any per-recipient logic)
-            // pass through clientMessageId for idempotency
             ChatMessage saved = chatMessageService.saveMessage(
                     convType.toUpperCase(),
                     fromUserId,
@@ -193,13 +289,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     req.getClientMessageId()
             );
 
-            // 2.a Send ACK to sender (indicates server has persisted the message)
+            // 2.a Send ACK to sender
             try {
                 Map<String, Object> ackPayload = new HashMap<>();
                 if (req.getClientMessageId() != null) {
                     ackPayload.put("clientMessageId", req.getClientMessageId());
                 }
-                // prefer logicMessageId if present as the canonical serverMessageId for the logical message
                 Long serverMessageId = saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId();
                 ackPayload.put("serverMessageId", serverMessageId);
                 ackPayload.put("status", "received");
@@ -212,41 +307,15 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 sessionManager.sendToUser(fromUserId, new TextMessage(ackJson));
             } catch (Exception e) {
                 log.warn("Failed to send ACK to user {}: {}", fromUserId, e.getMessage());
-                // continue: we still attempt to send NEW_MESSAGE to recipients
             }
 
-            // 3. build and send messages: ensure each recipient receives a payload whose toUserId equals that recipient
+            // 3. build and send messages
             if ("PRIVATE".equalsIgnoreCase(convType)) {
-                // Sender's view payload
-/*                NewMessageResponse respForSender = new NewMessageResponse();
-                respForSender.setId(saved.getId());
-                respForSender.setConversationType(saved.getConversationType());
-                respForSender.setFromUserId(saved.getFromUserId());
-                respForSender.setToUserId(saved.getFromUserId()); // sender's perspective: to = self
-                respForSender.setGroupId(saved.getGroupId());
-                respForSender.setMessageType(saved.getMessageType());
-                respForSender.setContent(saved.getContent());
-                respForSender.setCreatedAt(saved.getCreatedAt());
-                if (saved.getAttachmentId() != null) {
-                    try {
-                        respForSender.setFileUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
-                    } catch (Exception ex) {
-                        log.warn("failed to generate presigned url for attachment {}: {}", saved.getAttachmentId(), ex.getMessage());
-                    }
-                }
-
-                WebSocketEnvelope<NewMessageResponse> envSender = new WebSocketEnvelope<>();
-                envSender.setType("NEW_MESSAGE");
-                envSender.setPayload(respForSender);
-                String jsonSender = objectMapper.writeValueAsString(envSender);
-                TextMessage outMsgSender = new TextMessage(jsonSender);*/
-
-                // Receiver's view payload
                 NewMessageResponse respForReceiver = new NewMessageResponse();
                 respForReceiver.setId(saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId());
                 respForReceiver.setConversationType(saved.getConversationType());
                 respForReceiver.setFromUserId(saved.getFromUserId());
-                respForReceiver.setToUserId(toUserId); // receiver's perspective: to = recipient
+                respForReceiver.setToUserId(toUserId);
                 respForReceiver.setGroupId(saved.getGroupId());
                 respForReceiver.setMessageType(saved.getMessageType());
                 respForReceiver.setContent(saved.getContent());
@@ -272,7 +341,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     sessionManager.sendToUser(toUserId, outMsgReceiver);
                 }
             } else if ("GROUP".equalsIgnoreCase(convType)) {
-                // Build base response and send a per-member payload
                 NewMessageResponse baseResp = new NewMessageResponse();
                 baseResp.setId(saved.getId());
                 baseResp.setConversationType(saved.getConversationType());
@@ -311,7 +379,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 respForUser.setId(baseResp.getId());
                 respForUser.setConversationType(baseResp.getConversationType());
                 respForUser.setFromUserId(baseResp.getFromUserId());
-                respForUser.setToUserId(uid); // recipient-specific view
+                respForUser.setToUserId(uid);
                 respForUser.setGroupId(baseResp.getGroupId());
                 respForUser.setMessageType(baseResp.getMessageType());
                 respForUser.setContent(baseResp.getContent());
@@ -338,6 +406,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         if (userId != null) {
             sessionManager.unregister(userId, session);
             log.info("WS disconnected: userId={} sessionId={} status={}", userId, session.getId(), status);
+            // 可选：这里无法确定该用户正在看的 conv，因此不在此做 leave
         }
     }
 

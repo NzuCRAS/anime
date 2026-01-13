@@ -87,6 +87,7 @@ public class ChatMessageService {
             }
         }
 
+        // 消息持久化
         if ("PRIVATE".equalsIgnoreCase(conversationType)) {
             if (toUserId == null) {
                 throw new IllegalArgumentException("私聊消息的 toUserId 不能为空");
@@ -128,7 +129,7 @@ public class ChatMessageService {
                 chatMessageMapper.insert(receiverView);
 
                 // 3) 发送会话更新通知（SESSION_UPDATED）
-/*                notifySessionNewMessageForPrivate(fromUserId, toUserId);*/
+/*              notifySessionNewMessageForPrivate(fromUserId, toUserId);*/
 
                 // 返回发送者视角记录（WS、前端一般用这一条）
                 return senderView;
@@ -335,7 +336,7 @@ public class ChatMessageService {
     /**
      * 将实体转换为历史消息 DTO，根据 attachmentId 生成 fileUrl
      */
-    private ChatMessageDTO toDto(ChatMessage m) {
+    public ChatMessageDTO toDto(ChatMessage m) {
         ChatMessageDTO dto = new ChatMessageDTO();
         dto.setId(m.getId());
         dto.setConversationType(m.getConversationType());
