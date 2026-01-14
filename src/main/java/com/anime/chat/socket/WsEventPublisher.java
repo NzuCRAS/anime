@@ -21,6 +21,7 @@ public class WsEventPublisher {
     public void sendToUser(Long userId, String type, Object payload) {
         if (userId == null) return;
         try {
+            log.info("WsEventPublisher sendToUser");
             WebSocketEnvelope<Object> env = new WebSocketEnvelope<>();
             env.setType(type);
             env.setPayload(payload);
@@ -29,7 +30,7 @@ public class WsEventPublisher {
                     userId, type, json);
             sessionManager.sendToUser(userId, new TextMessage(json));
         } catch (Exception e) {
-            log.warn("WsEventPublisher sendToUser failed, userId={}, type={}, err={}",
+            log.error("WsEventPublisher sendToUser failed, userId={}, type={}, err={}",
                     userId, type, e.getMessage());
         }
     }

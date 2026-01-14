@@ -81,6 +81,7 @@ public class ChatMessageController {
         try {
             System.out.println("======================== read =========================");
             MarkPrivateMessagesReadResponse resp = chatMessageService.markPrivateMessagesRead(request, userId);
+            System.out.println("======================== read end =========================");
             return Result.success(resp);
         } catch (IllegalArgumentException e) {
             log.error(e.getMessage());

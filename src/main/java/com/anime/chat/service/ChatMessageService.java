@@ -169,7 +169,6 @@ public class ChatMessageService {
                     chatMessageMapper.insert(m);
                 }
 
-                // 会话更新推送（保持原逻辑）
                 for (Long uid : memberIds) {
                     if (uid == null) continue;
                     notifySessionNewMessageForGroup(uid, groupId);
@@ -219,9 +218,6 @@ public class ChatMessageService {
         return resp;
     }
 
-    /**
-     * 单向删除：仅删除当前用户视角的该条消息
-     */
     public DeleteMessageResponse deleteMessageForUser(DeleteMessageRequest request,
                                                       Long currentUserId) {
         Long messageId = request.getMessageId();
@@ -231,7 +227,6 @@ public class ChatMessageService {
 
         int deleted = chatMessageMapper.deleteMessageForUser(currentUserId, messageId);
 
-        // 可选：通知当前用户前端移除该消息
         if (deleted > 0) {
             try {
                 var payload = java.util.Map.of("messageId", messageId);
@@ -246,10 +241,6 @@ public class ChatMessageService {
         return resp;
     }
 
-    /**
-     * 撤回消息：仅允许发送者在 3 分钟内撤回。
-     * 行为：将该逻辑消息下的所有记录（所有接收者 + 发送者视角）逻辑删除。
-     */
     @Transactional
     public RecallMessageResponse recallMessage(RecallMessageRequest request, Long currentUserId) {
         RecallMessageResponse resp = new RecallMessageResponse();
@@ -265,7 +256,6 @@ public class ChatMessageService {
             return resp;
         }
 
-        // 必须是发送者本人
         if (anyRecord.getFromUserId() == null || !anyRecord.getFromUserId().equals(currentUserId)) {
             resp.setAllowed(false);
             resp.setRecalledCount(0);
@@ -273,7 +263,6 @@ public class ChatMessageService {
             return resp;
         }
 
-        // 必须在时间窗口内
         LocalDateTime created = anyRecord.getCreatedAt();
         if (created == null || LocalDateTime.now().isAfter(created.plus(RECALL_WINDOW))) {
             resp.setAllowed(false);
@@ -289,7 +278,6 @@ public class ChatMessageService {
         resp.setRecalledCount(updated);
         resp.setReason(null);
 
-        // 事务提交后，通知所有相关用户，让前端移除该逻辑消息
         final Long logicMessageIdFinal = logicId;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
@@ -336,6 +324,8 @@ public class ChatMessageService {
                             "lastReadMessageId", lastReadMessageId
                     );
                     wsEventPublisher.sendToUser(friendId, SocketType.PRIVATE_MESSAGES_READ.toString(), payload);
+                    log.info("markPrivateMessagesRead notify sent, currentUserId={}, friendId={}, lastReadMessageId={}",
+                            currentUserId, friendId, lastReadMessageId);
                 }
             } catch (Exception e) {
                 log.warn("markPrivateMessagesRead notify failed, currentUserId={}, friendId={}, err={}",
@@ -370,6 +360,9 @@ public class ChatMessageService {
         return resp;
     }
 
+    /**
+     * 将实体转换为历史消息 DTO，根据 attachmentId 生成 fileUrl，并携带 isRead
+     */
     public ChatMessageDTO toDto(ChatMessage m) {
         ChatMessageDTO dto = new ChatMessageDTO();
         dto.setId(m.getId());
@@ -380,6 +373,7 @@ public class ChatMessageService {
         dto.setMessageType(m.getMessageType());
         dto.setContent(m.getContent());
         dto.setCreatedAt(m.getCreatedAt());
+        dto.setIsRead(m.getIsRead()); // 新增：携带是否已读
 
         if (!Objects.equals(m.getMessageType(), "TEXT") && m.getAttachmentId() != null) {
             String url = attachmentService.generatePresignedGetUrl(m.getAttachmentId(), 3600);

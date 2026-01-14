@@ -54,4 +54,13 @@ public class ChatMessageDTO {
      * 发送时间
      */
     private LocalDateTime createdAt;
+
+    /**
+     * 是否已读（对该接收方）：0=未读，1=已读
+     *
+     * 私聊中：
+     * - 当 fromUserId 是“我”，toUserId 是“对方”时，isRead 表示对方是否已读我发的消息
+     * - 当 fromUserId 是“对方”，toUserId 是“我”时，isRead 表示我是否已读对方的消息
+     */
+    private Integer isRead;
 }
