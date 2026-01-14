@@ -29,14 +29,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * WebSocket 处理器：负责接收消息、调用业务层、广播消息。
- *
- * 白板部分（新方案）：
- * - 使用会话级唯一白板（convId），不再使用 boardId
- * - WHITEBOARD_OPEN（可选）：幂等初始化
- * - WHITEBOARD_JOIN：加入 members 并返回 15 分钟窗口事件
- * - WHITEBOARD_STROKE_PART：写入 Streams 并仅转发给 members
- * - WHITEBOARD_CLEAR：写入清空事件并广播
+ * WebSocket 处理��：增加 TYPING_START/TYPING_STOP 事件转发（微信式“正在输入”）
  */
 @Slf4j
 @Component
@@ -55,7 +48,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) {
         Long userId = getUserId(session);
         if (userId == null) {
-            log.warn("WS connection established but userId is null, closing");
             closeSession(session, CloseStatus.BAD_DATA);
             return;
         }
@@ -67,14 +59,11 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
         Long userId = getUserId(session);
         if (userId == null) {
-            log.warn("WS message but userId is null, closing");
             closeSession(session, CloseStatus.BAD_DATA);
             return;
         }
 
         String payload = message.getPayload();
-        log.debug("WS recv from userId={} payload={}", userId, payload);
-
         WebSocketEnvelope<?> envelope;
         try {
             envelope = objectMapper.readValue(payload, WebSocketEnvelope.class);
@@ -93,7 +82,29 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // --- WebRTC signaling messages ---
+            // ---- Typing indicator ----
+            if ("TYPING_START".equalsIgnoreCase(type) || "TYPING_STOP".equalsIgnoreCase(type)) {
+                Map<?,?> p = (Map<?,?>) envelope.getPayload();
+                Object tu = p == null ? null : p.get("targetUserId");
+                Long targetUserId = null;
+                if (tu instanceof Number n) targetUserId = n.longValue();
+                else if (tu instanceof String s) try { targetUserId = Long.parseLong(s); } catch (Exception ignore) {}
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "PEER_TYPING", Map.of("isTyping", false));
+                    return;
+                }
+                boolean isTyping = "TYPING_START".equalsIgnoreCase(type);
+                var forward = Map.of(
+                        "fromUserId", userId,
+                        "toUserId", targetUserId,
+                        "isTyping", isTyping,
+                        "ts", System.currentTimeMillis()
+                );
+                sessionManager.sendToUser(targetUserId, "PEER_TYPING", forward);
+                return;
+            }
+
+            // --- WebRTC signaling ---
             if ("CALL_INVITE".equalsIgnoreCase(type)) {
                 WebSocketEnvelope<CallInviteRequest> env =
                         objectMapper.readValue(payload,
@@ -152,8 +163,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             }
 
             // --------------- whiteboard (new) ----------------
-
-            // 可选：OPEN（或把 WHITEBOARD_CREATE 当作 OPEN 别名）
             if ("WHITEBOARD_OPEN".equalsIgnoreCase(type) || "WHITEBOARD_CREATE".equalsIgnoreCase(type)) {
                 WebSocketEnvelope<WhiteboardJoinRequest> env =
                         objectMapper.readValue(payload,
@@ -169,7 +178,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // JOIN：加入并返回最近窗口事件
             if ("WHITEBOARD_JOIN".equalsIgnoreCase(type)) {
                 WebSocketEnvelope<WhiteboardJoinRequest> env =
                         objectMapper.readValue(payload,
@@ -186,13 +194,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 笔画分片：写入并转发给 members
             if ("WHITEBOARD_STROKE_PART".equalsIgnoreCase(type)) {
                 WebSocketEnvelope<WhiteboardStrokePart> env =
                         objectMapper.readValue(payload,
                                 objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardStrokePart.class));
                 WhiteboardStrokePart p = env.getPayload();
-                Long targetUserId = p.getTargetUserId(); // 需要前端传 targetUserId
+                Long targetUserId = p.getTargetUserId();
                 if (targetUserId == null) {
                     sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
                     return;
@@ -212,13 +219,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 清空
             if ("WHITEBOARD_CLEAR".equalsIgnoreCase(type)) {
                 WebSocketEnvelope<WhiteboardClearRequest> env =
                         objectMapper.readValue(payload,
                                 objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardClearRequest.class));
                 WhiteboardClearRequest r = env.getPayload();
-                Long targetUserId = r.getTargetUserId(); // 需要前端传 targetUserId
+                Long targetUserId = r.getTargetUserId();
                 if (targetUserId == null) {
                     sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
                     return;
@@ -227,7 +233,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 可选：离开（前端关闭 overlay 时可发送）
             if ("WHITEBOARD_LEAVE".equalsIgnoreCase(type)) {
                 WebSocketEnvelope<WhiteboardJoinRequest> env =
                         objectMapper.readValue(payload,
@@ -240,7 +245,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 其他类型继续现有逻辑
             log.debug("WS unknown type: {}", type);
 
         } catch (Exception e) {
@@ -250,7 +254,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     private void handleSendMessage(Long fromUserId, SendMessageRequest req) {
         try {
-            // 1. basic validation
             String convType = req.getConversationType();
             String msgType = req.getMessageType();
             if (convType == null || msgType == null) {
@@ -277,7 +280,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 2. save message via service (service handles persistence and any per-recipient logic)
             ChatMessage saved = chatMessageService.saveMessage(
                     convType.toUpperCase(),
                     fromUserId,
@@ -289,7 +291,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     req.getClientMessageId()
             );
 
-            // 2.a Send ACK to sender
             try {
                 Map<String, Object> ackPayload = new HashMap<>();
                 if (req.getClientMessageId() != null) {
@@ -309,7 +310,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 log.warn("Failed to send ACK to user {}: {}", fromUserId, e.getMessage());
             }
 
-            // 3. build and send messages
             if ("PRIVATE".equalsIgnoreCase(convType)) {
                 NewMessageResponse respForReceiver = new NewMessageResponse();
                 respForReceiver.setId(saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId());
@@ -334,9 +334,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 String jsonReceiver = objectMapper.writeValueAsString(envReceiver);
                 TextMessage outMsgReceiver = new TextMessage(jsonReceiver);
 
-                // send to sender
                 sessionManager.sendToUser(fromUserId, outMsgReceiver);
-                // send to receiver (if different)
                 if (!toUserId.equals(fromUserId)) {
                     sessionManager.sendToUser(toUserId, outMsgReceiver);
                 }
@@ -406,7 +404,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         if (userId != null) {
             sessionManager.unregister(userId, session);
             log.info("WS disconnected: userId={} sessionId={} status={}", userId, session.getId(), status);
-            // 可选：这里无法确定该用户正在看的 conv，因此不在此做 leave
         }
     }
 
