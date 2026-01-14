@@ -288,6 +288,51 @@ public class UserController {
         }
     }
 
+    @Operation(summary = "获取当前登录用户信息", description = "根据 access token / refresh cookie 中的用户标识，返回 UserInfoDTO（包含头像 URL、签名等）")
+    @GetMapping("/me")
+    public ResponseEntity<Result<UserInfoDTO>> getCurrentUser(@CurrentUser Long currentUserId) {
+        if (currentUserId == null) {
+            failUserInfoDTO.setUsername("未授权");
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode())
+                    .body(Result.fail(ResultCode.UNAUTHORIZED, failUserInfoDTO));
+        }
+
+        try {
+            // 先通过 UserService 获取基础信息
+            UserInfoDTO dto = new UserInfoDTO();
+            dto.setId(String.valueOf(currentUserId));
+            try {
+                dto.setUsername(userService.getUsernameById(currentUserId));
+            } catch (Exception ignored) {}
+
+            // avatar
+            try {
+                Long avatarAttachmentId = userService.getAvatarAttachmentId(currentUserId);
+                if (avatarAttachmentId != null) {
+                    try {
+                        String avatarUrl = attachmentService.generatePresignedGetUrl(avatarAttachmentId, 300L);
+                        dto.setUserAvatarUrl(avatarUrl);
+                    } catch (Exception e) {
+                        log.debug("getCurrentUser: presigned url failed for avatar {}: {}", avatarAttachmentId, e.getMessage());
+                        dto.setUserAvatarUrl(null);
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            // signature
+            try {
+                dto.setPersonalSignature(userService.getPersonalSignature(currentUserId));
+            } catch (Exception ignored) {}
+
+            return ResponseEntity.ok(Result.success(dto));
+        } catch (Exception e) {
+            log.error("getCurrentUser error userId={}", currentUserId, e);
+            failUserInfoDTO.setUsername("获取用户信息失败");
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode())
+                    .body(Result.fail(ResultCode.SYSTEM_ERROR, failUserInfoDTO));
+        }
+    }
+
     @Operation(summary = "上传用户头像绑定", description = "把已上传的 attachmentId 绑定为当前用户的头像（需登录）")
     @PostMapping("/userAvatar")
     public ResponseEntity<?> postUserAvatar(@CurrentUser Long userId,
