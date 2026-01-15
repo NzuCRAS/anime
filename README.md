@@ -11,7 +11,7 @@
 后端服务代码仓库，为**Blue Archive**风格的Momotalk社区提供核心API支持。
 包含用户认证、聊天、动态发布、文件存储等功能。
 
-[📖 接口文档](#-api-documentation) • [🛠️ 部署指南](#%EF%B8%8F-setup--deployment) • [🔐 HTTPS配置](#-https-configuration-local)
+[📖 详细接口文档](doc/API文档_chat&video.md) • [🧱 架构设计](doc/架构图.md) • [⚡ 快速部署](#-setup--deployment)
 
 </div>
 
