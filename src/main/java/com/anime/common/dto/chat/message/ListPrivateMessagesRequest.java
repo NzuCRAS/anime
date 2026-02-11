@@ -12,4 +12,9 @@ public class ListPrivateMessagesRequest {
      * 好友用户ID
      */
     private Long friendId;
+
+    /**
+     * 分页页码 (每页50条消息)
+     */
+    private Integer page;
 }

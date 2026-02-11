@@ -1,9 +1,18 @@
 package com.anime.chat.socket;
 
+import com.anime.chat.service.CallService;
 import com.anime.chat.service.ChatMessageService;
+import com.anime.chat.service.WhiteboardService;
+import com.anime.common.dto.chat.call.CallAnswerRequest;
+import com.anime.common.dto.chat.call.CallControlDto;
+import com.anime.common.dto.chat.call.CallInviteRequest;
+import com.anime.common.dto.chat.call.IceCandidateDto;
 import com.anime.common.dto.chat.socket.NewMessageResponse;
 import com.anime.common.dto.chat.socket.SendMessageRequest;
 import com.anime.common.dto.chat.socket.WebSocketEnvelope;
+import com.anime.common.dto.chat.whiteboard.WhiteboardClearRequest;
+import com.anime.common.dto.chat.whiteboard.WhiteboardJoinRequest;
+import com.anime.common.dto.chat.whiteboard.WhiteboardStrokePart;
 import com.anime.common.entity.chat.ChatMessage;
 import com.anime.common.mapper.chat.ChatGroupMemberMapper;
 import com.anime.common.service.AttachmentService;
@@ -16,13 +25,11 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * WebSocket 处理器：负责接收消息、调用业务层、广播消息。
- *
- * 已修正：使用 WebSocketSessionManager 管理会话与发送，避免 handler 内直接维护并发集合。
- * 增强：在持久化成功后向发送方发送 ACK（包含 clientMessageId 与 serverMessageId），然后再投递 NEW_MESSAGE 给接收方。
+ * WebSocket 处理��：增加 TYPING_START/TYPING_STOP 事件转发（微信式“正在输入”）
  */
 @Slf4j
 @Component
@@ -34,12 +41,13 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatGroupMemberMapper chatGroupMemberMapper;
     private final ObjectMapper objectMapper;
     private final WebSocketSessionManager sessionManager;
+    private final CallService callService;
+    private final WhiteboardService whiteboardService;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         Long userId = getUserId(session);
         if (userId == null) {
-            log.warn("WS connection established but userId is null, closing");
             closeSession(session, CloseStatus.BAD_DATA);
             return;
         }
@@ -51,14 +59,11 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
         Long userId = getUserId(session);
         if (userId == null) {
-            log.warn("WS message but userId is null, closing");
             closeSession(session, CloseStatus.BAD_DATA);
             return;
         }
 
         String payload = message.getPayload();
-        log.debug("WS recv from userId={} payload={}", userId, payload);
-
         WebSocketEnvelope<?> envelope;
         try {
             envelope = objectMapper.readValue(payload, WebSocketEnvelope.class);
@@ -67,20 +72,188 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        if ("SEND_MESSAGE".equalsIgnoreCase(envelope.getType())) {
-            // Because of type erasure we deserialize payload with explicit generic type
-            WebSocketEnvelope<SendMessageRequest> env =
-                    objectMapper.readValue(payload,
-                            objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, SendMessageRequest.class));
-            handleSendMessage(session, userId, env.getPayload());
-        } else {
-            log.debug("WS unknown type: {}", envelope.getType());
+        String type = envelope.getType();
+        try {
+            if ("SEND_MESSAGE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<SendMessageRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, SendMessageRequest.class));
+                handleSendMessage(userId, env.getPayload());
+                return;
+            }
+
+            // ---- Typing indicator ----
+            if ("TYPING_START".equalsIgnoreCase(type) || "TYPING_STOP".equalsIgnoreCase(type)) {
+                Map<?,?> p = (Map<?,?>) envelope.getPayload();
+                Object tu = p == null ? null : p.get("targetUserId");
+                Long targetUserId = null;
+                if (tu instanceof Number n) targetUserId = n.longValue();
+                else if (tu instanceof String s) try { targetUserId = Long.parseLong(s); } catch (Exception ignore) {}
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "PEER_TYPING", Map.of("isTyping", false));
+                    return;
+                }
+                boolean isTyping = "TYPING_START".equalsIgnoreCase(type);
+                var forward = Map.of(
+                        "fromUserId", userId,
+                        "toUserId", targetUserId,
+                        "isTyping", isTyping,
+                        "ts", System.currentTimeMillis()
+                );
+                sessionManager.sendToUser(targetUserId, "PEER_TYPING", forward);
+                return;
+            }
+
+            // --- WebRTC signaling ---
+            if ("CALL_INVITE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallInviteRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallInviteRequest.class));
+                CallInviteRequest req = env.getPayload();
+                String callId = callService.createAndForwardInvite(userId, req);
+                if (callId == null) {
+                    sessionManager.sendToUser(userId, "CALL_FAILED", Map.of("reason", "target_unavailable_or_not_friend"));
+                } else {
+                    sessionManager.sendToUser(userId, "CALL_OUTGOING", Map.of("callId", callId, "targetUserId", req.getTargetUserId()));
+                }
+                return;
+            }
+
+            if ("CALL_ANSWER".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallAnswerRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallAnswerRequest.class));
+                CallAnswerRequest req = env.getPayload();
+                boolean ok = callService.handleAnswer(userId, req);
+                if (!ok) {
+                    sessionManager.sendToUser(userId, "CALL_FAILED", Map.of("reason", "invalid_call_or_not_allowed"));
+                }
+                return;
+            }
+
+            if ("CALL_ICE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<IceCandidateDto> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, IceCandidateDto.class));
+                IceCandidateDto c = env.getPayload();
+                boolean ok = callService.handleIce(userId, c);
+                if (!ok) {
+                    log.debug("Failed to forward ICE candidate for userId={} callId={}", userId, c == null ? null : c.getCallId());
+                }
+                return;
+            }
+
+            if ("CALL_HANGUP".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallControlDto> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallControlDto.class));
+                CallControlDto ctrl = env.getPayload();
+                callService.handleHangup(userId, ctrl, "CALL_HANGUP");
+                return;
+            }
+
+            if ("CALL_REJECT".equalsIgnoreCase(type) || "CALL_ACCEPT".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<CallControlDto> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, CallControlDto.class));
+                CallControlDto ctrl = env.getPayload();
+                String ev = type.equalsIgnoreCase("CALL_REJECT") ? "CALL_REJECT" : "CALL_ACCEPT";
+                callService.handleHangup(userId, ctrl, ev);
+                return;
+            }
+
+            // --------------- whiteboard (new) ----------------
+            if ("WHITEBOARD_OPEN".equalsIgnoreCase(type) || "WHITEBOARD_CREATE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardJoinRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardJoinRequest.class));
+                WhiteboardJoinRequest req = env.getPayload();
+                Long targetUserId = req.getTargetUserId();
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                } else {
+                    whiteboardService.openWhiteboardIfNeeded(userId, targetUserId);
+                    sessionManager.sendToUser(userId, "WHITEBOARD_OPENED", Map.of("targetUserId", targetUserId));
+                }
+                return;
+            }
+
+            if ("WHITEBOARD_JOIN".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardJoinRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardJoinRequest.class));
+                WhiteboardJoinRequest req = env.getPayload();
+                Long targetUserId = req.getTargetUserId();
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                    return;
+                }
+                whiteboardService.openWhiteboardIfNeeded(userId, targetUserId);
+                List<Map<String, Object>> events = whiteboardService.joinAndLoadWindow(userId, targetUserId);
+                sessionManager.sendToUser(userId, "WHITEBOARD_INIT", Map.of("events", events));
+                return;
+            }
+
+            if ("WHITEBOARD_STROKE_PART".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardStrokePart> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardStrokePart.class));
+                WhiteboardStrokePart p = env.getPayload();
+                Long targetUserId = p.getTargetUserId();
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                    return;
+                }
+
+                Map<String, Object> ev = new HashMap<>();
+                ev.put("type", "WHITEBOARD_STROKE_PART");
+                ev.put("strokeId", p.getStrokeId());
+                ev.put("tool", p.getTool());
+                ev.put("color", p.getColor());
+                ev.put("width", p.getWidth());
+                ev.put("points", p.getPoints());
+                ev.put("isEnd", p.getIsEnd());
+                ev.put("ts", p.getTs() == null ? System.currentTimeMillis() : p.getTs());
+
+                whiteboardService.appendStrokeAndForward(userId, targetUserId, ev);
+                return;
+            }
+
+            if ("WHITEBOARD_CLEAR".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardClearRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardClearRequest.class));
+                WhiteboardClearRequest r = env.getPayload();
+                Long targetUserId = r.getTargetUserId();
+                if (targetUserId == null) {
+                    sessionManager.sendToUser(userId, "WHITEBOARD_ERROR", Map.of("reason", "target_required"));
+                    return;
+                }
+                whiteboardService.clearAndBroadcast(userId, targetUserId, r.getTs());
+                return;
+            }
+
+            if ("WHITEBOARD_LEAVE".equalsIgnoreCase(type)) {
+                WebSocketEnvelope<WhiteboardJoinRequest> env =
+                        objectMapper.readValue(payload,
+                                objectMapper.getTypeFactory().constructParametricType(WebSocketEnvelope.class, WhiteboardJoinRequest.class));
+                WhiteboardJoinRequest req = env.getPayload();
+                Long targetUserId = req.getTargetUserId();
+                if (targetUserId != null) {
+                    whiteboardService.leave(userId, targetUserId);
+                }
+                return;
+            }
+
+            log.debug("WS unknown type: {}", type);
+
+        } catch (Exception e) {
+            log.error("WS handleTextMessage error for type={} userId={}", type, userId, e);
         }
     }
 
-    private void handleSendMessage(WebSocketSession session, Long fromUserId, SendMessageRequest req) {
+    private void handleSendMessage(Long fromUserId, SendMessageRequest req) {
         try {
-            // 1. basic validation
             String convType = req.getConversationType();
             String msgType = req.getMessageType();
             if (convType == null || msgType == null) {
@@ -107,8 +280,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 return;
             }
 
-            // 2. save message via service (service handles persistence and any per-recipient logic)
-            // pass through clientMessageId for idempotency
             ChatMessage saved = chatMessageService.saveMessage(
                     convType.toUpperCase(),
                     fromUserId,
@@ -120,13 +291,11 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                     req.getClientMessageId()
             );
 
-            // 2.a Send ACK to sender (indicates server has persisted the message)
             try {
                 Map<String, Object> ackPayload = new HashMap<>();
                 if (req.getClientMessageId() != null) {
                     ackPayload.put("clientMessageId", req.getClientMessageId());
                 }
-                // prefer logicMessageId if present as the canonical serverMessageId for the logical message
                 Long serverMessageId = saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId();
                 ackPayload.put("serverMessageId", serverMessageId);
                 ackPayload.put("status", "received");
@@ -139,43 +308,24 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 sessionManager.sendToUser(fromUserId, new TextMessage(ackJson));
             } catch (Exception e) {
                 log.warn("Failed to send ACK to user {}: {}", fromUserId, e.getMessage());
-                // continue: we still attempt to send NEW_MESSAGE to recipients
             }
 
-            // 3. build and send messages: ensure each recipient receives a payload whose toUserId equals that recipient
             if ("PRIVATE".equalsIgnoreCase(convType)) {
-                // Sender's view payload
-                NewMessageResponse respForSender = new NewMessageResponse();
-                respForSender.setId(saved.getId());
-                respForSender.setConversationType(saved.getConversationType());
-                respForSender.setFromUserId(saved.getFromUserId());
-                respForSender.setToUserId(saved.getFromUserId()); // sender's perspective: to = self
-                respForSender.setGroupId(saved.getGroupId());
-                respForSender.setMessageType(saved.getMessageType());
-                respForSender.setContent(saved.getContent());
-                respForSender.setCreatedAt(saved.getCreatedAt());
-                if ("IMAGE".equalsIgnoreCase(saved.getMessageType()) && saved.getAttachmentId() != null) {
-                    respForSender.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
-                }
-
-                WebSocketEnvelope<NewMessageResponse> envSender = new WebSocketEnvelope<>();
-                envSender.setType("NEW_MESSAGE");
-                envSender.setPayload(respForSender);
-                String jsonSender = objectMapper.writeValueAsString(envSender);
-                TextMessage outMsgSender = new TextMessage(jsonSender);
-
-                // Receiver's view payload
                 NewMessageResponse respForReceiver = new NewMessageResponse();
                 respForReceiver.setId(saved.getLogicMessageId() != null ? saved.getLogicMessageId() : saved.getId());
                 respForReceiver.setConversationType(saved.getConversationType());
                 respForReceiver.setFromUserId(saved.getFromUserId());
-                respForReceiver.setToUserId(toUserId); // receiver's perspective: to = recipient
+                respForReceiver.setToUserId(toUserId);
                 respForReceiver.setGroupId(saved.getGroupId());
                 respForReceiver.setMessageType(saved.getMessageType());
                 respForReceiver.setContent(saved.getContent());
                 respForReceiver.setCreatedAt(saved.getCreatedAt());
-                if ("IMAGE".equalsIgnoreCase(saved.getMessageType()) && saved.getAttachmentId() != null) {
-                    respForReceiver.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                if (saved.getAttachmentId() != null) {
+                    try {
+                        respForReceiver.setFileUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                    } catch (Exception ex) {
+                        log.error("failed to generate presigned url for attachment {}: {}", saved.getAttachmentId(), ex.getMessage());
+                    }
                 }
 
                 WebSocketEnvelope<NewMessageResponse> envReceiver = new WebSocketEnvelope<>();
@@ -184,14 +334,11 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 String jsonReceiver = objectMapper.writeValueAsString(envReceiver);
                 TextMessage outMsgReceiver = new TextMessage(jsonReceiver);
 
-                // send to sender
-                sessionManager.sendToUser(fromUserId, outMsgSender);
-                // send to receiver (if different)
-                if (toUserId != null && !toUserId.equals(fromUserId)) {
+                sessionManager.sendToUser(fromUserId, outMsgReceiver);
+                if (!toUserId.equals(fromUserId)) {
                     sessionManager.sendToUser(toUserId, outMsgReceiver);
                 }
             } else if ("GROUP".equalsIgnoreCase(convType)) {
-                // Build base response and send a per-member payload
                 NewMessageResponse baseResp = new NewMessageResponse();
                 baseResp.setId(saved.getId());
                 baseResp.setConversationType(saved.getConversationType());
@@ -200,8 +347,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 baseResp.setMessageType(saved.getMessageType());
                 baseResp.setContent(saved.getContent());
                 baseResp.setCreatedAt(saved.getCreatedAt());
-                if ("IMAGE".equalsIgnoreCase(saved.getMessageType()) && saved.getAttachmentId() != null) {
-                    baseResp.setImageUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                if (saved.getAttachmentId() != null) {
+                    try {
+                        baseResp.setFileUrl(attachmentService.generatePresignedGetUrl(saved.getAttachmentId(), 3600));
+                    } catch (Exception ex) {
+                        log.warn("failed to generate presigned url for attachment {}: {}", saved.getAttachmentId(), ex.getMessage());
+                    }
                 }
 
                 sendToGroup(saved.getGroupId(), baseResp);
@@ -226,12 +377,12 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                 respForUser.setId(baseResp.getId());
                 respForUser.setConversationType(baseResp.getConversationType());
                 respForUser.setFromUserId(baseResp.getFromUserId());
-                respForUser.setToUserId(uid); // recipient-specific view
+                respForUser.setToUserId(uid);
                 respForUser.setGroupId(baseResp.getGroupId());
                 respForUser.setMessageType(baseResp.getMessageType());
                 respForUser.setContent(baseResp.getContent());
                 respForUser.setCreatedAt(baseResp.getCreatedAt());
-                respForUser.setImageUrl(baseResp.getImageUrl());
+                respForUser.setFileUrl(baseResp.getFileUrl());
 
                 WebSocketEnvelope<NewMessageResponse> out = new WebSocketEnvelope<>();
                 out.setType("NEW_MESSAGE");

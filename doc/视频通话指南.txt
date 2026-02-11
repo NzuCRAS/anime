@@ -1,0 +1,279 @@
+================================================================================
+前端开发指南：局域网/P2P 双人视频通话功能实现
+================================================================================
+
+1. 概述
+--------------------------------------------------------------------------------
+本功能旨在实现双人点对点（P2P）视频通话。
+- **信令通道**：复用现有的 WebSocket 连接（与聊天功能共用）。
+- **媒体传输**：使用标准 WebRTC（RTCPeerConnection）。
+- **网络环境**：主要针对同一局域网内或 NAT 类型较宽松的环境（目前未强制部署 TURN 服务器，使用公共 STUN 或直连）。
+
+2. 核心流程图解
+--------------------------------------------------------------------------------
+[发起方 A]                            [服务器]                            [接收方 B]
+    |                                    |                                    |
+    |--1. createOffer, setLocalDesc ---> |                                    |
+    |--2. 发送 CALL_INVITE (含 SDP) ---> | ---转发 CALL_INVITE -------------> |
+    |                                    |                                    | <收到邀请，弹出接听界面>
+    |                                    | <---3. 发送 CALL_ANSWER (含 SDP)---| <用户接听，createAnswer>
+    |<--转发 CALL_ANSWER ----------------|                                    |
+    | <setRemoteDesc>                    |                                    |
+    |                                    |                                    |
+    |--4. 发现 ICE Candidate ----------> | ---转发 CALL_ICE ----------------> | <addIceCandidate>
+    | <addIceCandidate>                  | <---转发 CALL_ICE ---------------- | <发现 ICE Candidate>
+    |                                    |                                    |
+    |======================= P2P 媒体流建立 (Video/Audio) ====================|
+    |                                    |                                    |
+    |--5. 挂断 CALL_HANGUP ------------> | ---转发 CALL_HANGUP -------------> | <关闭连接，清理 UI>
+
+
+3. WebSocket 信令协议 (Envelope 格式)
+--------------------------------------------------------------------------------
+所有 WebSocket 消息均使用统一的 Envelope 结构：
+{
+  "type": "消息类型",
+  "payload": { ...数据对象... }
+}
+
+### 3.1 发起呼叫 (CALL_INVITE)
+**方向**: 发起方 -> 服务器 -> 接收方
+**Payload**:
+{
+  "targetUserId": 123,           // [必填] 目标用户 ID
+  "callId": "uuid-...",          // [可选] 前端生成 UUID，若为空后端会生成并返回 CALL_OUTGOING
+  "sdp": {                       // [必填] SDP Offer 对象
+      "sdp": "v=0...",
+      "type": "offer"
+  },
+  "metadata": "video,audio"      // [可选] 附加信息
+}
+
+*接收方收到的 payload 会包含 `fromUserId` 和 `callId`。*
+
+### 3.2 应答呼叫 (CALL_ANSWER)
+**方向**: 接收方 -> 服务器 -> 发起方
+**Payload**:
+{
+  "callId": "uuid-...",          // [必填] 对应 INVITE 中的 callId
+  "sdp": {                       // [必填] SDP Answer 对象
+      "sdp": "v=0...",
+      "type": "answer"
+  }
+}
+
+### 3.3 ICE 候选交换 (CALL_ICE)
+**方向**: 双向 (发现一个 candidate 就发一个)
+**Payload**:
+{
+  "callId": "uuid-...",
+  "candidate": "candidate:...",  // [必填] candidate 字符串
+  "sdpMid": "0",                 // [必填]
+  "sdpMLineIndex": 0             // [必填]
+}
+
+### 3.4 挂断/拒绝 (CALL_HANGUP / CALL_REJECT)
+**方向**: 双向
+**Payload**:
+{
+  "callId": "uuid-...",
+  "reason": "user_hangup"        // 原因字符串
+}
+
+### 3.5 异常/失败 (CALL_FAILED)
+**方向**: 服务器 -> 发送方
+**Payload**:
+{
+  "reason": "target_offline"     // 错误原因
+}
+
+
+4. 前端实现步骤详解
+--------------------------------------------------------------------------------
+
+### 步骤 1: 准备环境与配置
+配置 RTCPeerConnection 的 ICE Server。局域网内可为空，跨网建议加公共 STUN。
+
+const pcConfig = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' } // Google 公共 STUN
+  ]
+};
+
+### 步骤 2: 获取本地媒体流 (getUserMedia)
+在发起或接听前，必须先获取摄像头/麦克风权限。
+
+let localStream;
+async function startLocalMedia() {
+  localStream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+  // 将流绑定到本地 <video> 标签预览
+  document.getElementById('localVideo').srcObject = localStream;
+}
+
+### 步骤 3: 初始化 PeerConnection (通用函数)
+无论是发起方还是接收方，都需要创建 PC 并绑定回调。
+
+let pc;
+function createPeerConnection(targetUserId, currentCallId) {
+  pc = new RTCPeerConnection(pcConfig);
+
+  // 1. 发送本地 ICE Candidate 给对方
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendSignal('CALL_ICE', {
+        callId: currentCallId,
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid,
+        sdpMLineIndex: event.candidate.sdpMLineIndex
+      });
+    }
+  };
+
+  // 2. 接收远程流并显示
+  pc.ontrack = (event) => {
+    const remoteVid = document.getElementById('remoteVideo');
+    if (remoteVid.srcObject !== event.streams[0]) {
+      remoteVid.srcObject = event.streams[0];
+    }
+  };
+
+  // 3. 将本地流加入连接
+  if (localStream) {
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+}
+
+### 步骤 4: 发起呼叫 (Caller 逻辑)
+
+async function startCall(targetUserId) {
+  const callId = crypto.randomUUID(); // 生成 UUID
+  await startLocalMedia();            // 1. 获取媒体
+  createPeerConnection(targetUserId, callId); // 2. 创建 PC
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // 3. 发送 INVITE
+  sendSignal('CALL_INVITE', {
+    targetUserId: targetUserId,
+    callId: callId,
+    sdp: offer
+  });
+}
+
+### 步骤 5: 接听呼叫 (Callee 逻辑)
+
+// 当 WebSocket 收到 CALL_INVITE 时触发
+async function handleIncomingCall(payload) {
+  const confirmAccept = confirm(`收到来自 ${payload.fromUserId} 的视频邀请，是否接听？`);
+
+  if (confirmAccept) {
+    await startLocalMedia();
+    createPeerConnection(payload.fromUserId, payload.callId);
+
+    // 1. 设置远端描述 (Offer)
+    await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+
+    // 2. 创建应答 (Answer)
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    // 3. 发送 ANSWER
+    sendSignal('CALL_ANSWER', {
+      callId: payload.callId,
+      sdp: answer
+    });
+  } else {
+    // 拒绝呼叫
+    sendSignal('CALL_REJECT', {
+      callId: payload.callId,
+      reason: 'user_reject'
+    });
+  }
+}
+
+### 步骤 6: 处理信令消息 (WebSocket onmessage)
+
+socket.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  const type = msg.type;
+  const payload = msg.payload;
+
+  switch (type) {
+    case 'CALL_INVITE':
+      handleIncomingCall(payload);
+      break;
+
+    case 'CALL_ANSWER':
+      // 发起方收到 Answer
+      if (pc) {
+        pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+      }
+      break;
+
+    case 'CALL_ICE':
+      // 双方收到 ICE Candidate
+      if (pc) {
+        pc.addIceCandidate(new RTCIceCandidate({
+          candidate: payload.candidate,
+          sdpMid: payload.sdpMid,
+          sdpMLineIndex: payload.sdpMLineIndex
+        }));
+      }
+      break;
+
+    case 'CALL_HANGUP':
+    case 'CALL_REJECT':
+      alert('通话结束: ' + payload.reason);
+      closeVideoCall(); // 清理 PC 和 UI
+      break;
+  }
+};
+
+
+5. 常见问题排查 (Troubleshooting)
+--------------------------------------------------------------------------------
+
+1. **收到 CALL_REJECT (reason: user_reject)**
+   - 原因：接收方在 `confirm` 弹窗点了取消，或者代码逻辑自动拒绝了请求。
+   - 检查：确认接收方已登录 WS，且在收到 INVITE 时正确执行了 `createAnswer` 流程。
+
+2. **视频黑屏 / 无法连接**
+   - 检查：双方是否在同一局域网？如果不在，必须配置 TURN 服务器。
+   - 检查：控制台是否有 `SetRemoteDescription failed` 错误？通常是 SDP 格式不对或状态机顺序错误。
+   - 检查：是否可以访问摄像头？(浏览器通常要求 HTTPS 环境才能调用 getUserMedia，localhost 除外)。
+
+3. **WebSocket 断开**
+   - 视频通话强依赖 WebSocket 信令，请确保 WS 连接的心跳保活。
+
+4. **序列化错误 (Java 后端报错)**
+   - 确保前端发送 `sdp` 时发送的是对象 `{ sdp: "...", type: "offer" }`，而不是字符串。后端 DTO 已更新为匹配对象结构。
+
+6. 辅助工具函数
+--------------------------------------------------------------------------------
+function sendSignal(type, payload) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type, payload }));
+  } else {
+    console.error("WebSocket 未连接");
+  }
+}
+
+function closeVideoCall() {
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  if (localStream) {
+    localStream.getTracks().forEach(t => t.stop());
+    localStream = null;
+  }
+  // 清理 Video 标签 srcObject
+}
+
+================================================================================
+文档结束
+================================================================================

@@ -2,19 +2,23 @@ package com.anime.chat.controller;
 
 import com.anime.auth.web.CurrentUser;
 import com.anime.chat.service.ChatMessageService;
+import com.anime.common.dto.attachment.PresignRequestDTO;
+import com.anime.common.dto.attachment.PresignResponseDTO;
 import com.anime.common.dto.chat.message.*;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
+import com.anime.common.service.AttachmentService;
+import io.swagger.v3.oas.annotations.Operation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
 /**
- * 历史消息查询接口：
- * - 获取与某好友的历史私聊消息
- * - 获取某个群的历史群聊消息
- *
- * 实时发送/接收走 WebSocket，不通过这里。
+ * 历史消息查询与消息操作接口
  */
 @Slf4j
 @RestController
@@ -23,15 +27,28 @@ import org.springframework.web.bind.annotation.*;
 public class ChatMessageController {
 
     private final ChatMessageService chatMessageService;
+    private final AttachmentService attachmentService;
 
-    /**
-     * 获取与某好友的历史私聊消息
-     */
-    @PostMapping("/private")
+    @Operation(summary = "获取 presign（聊天上传文件）", description = "生成 presigned PUT URL，供前端上传用户文件")
+    @PostMapping("/presign")
+    public ResponseEntity<?> presign(@RequestBody PresignRequestDTO req, @CurrentUser Long userId) {
+        String storagePath = "/chatFile/" + userId + "/"+ LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        log.info("presign request storagePath={} originalFilename={} mimeType={} uploadedBy={}",
+                storagePath, req.getOriginalFilename(), req.getMimeType(), userId);
+        try {
+            PresignResponseDTO resp = attachmentService.preCreateAndPresign(
+                    storagePath, req.getMimeType(), userId, req.getOriginalFilename(), null, null);
+            return ResponseEntity.ok(resp);
+        } catch (Exception ex) {
+            log.error("presign failed", ex);
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body("presign failed");
+        }
+    }
+
+    @PostMapping("/private/getMessage")
     public Result<ListPrivateMessagesResponse> listPrivateMessages(
             @RequestBody ListPrivateMessagesRequest request,
             @CurrentUser Long userId) {
-
         try {
             ListPrivateMessagesResponse resp = chatMessageService.listPrivateMessages(request, userId);
             return Result.success(resp);
@@ -42,10 +59,7 @@ public class ChatMessageController {
         }
     }
 
-    /**
-     * 获取某个群的历史群聊消息
-     */
-    @PostMapping("/group")
+    @PostMapping("/group/getMessage")
     public Result<ListGroupMessagesResponse> listGroupMessages(
             @RequestBody ListGroupMessagesRequest request,
             @CurrentUser Long userId) {
@@ -60,15 +74,14 @@ public class ChatMessageController {
         }
     }
 
-    /**
-     * 将与某好友的私聊消息标记为已读（当前用户作为接收方）。
-     */
     @PostMapping("/private/markRead")
     public Result<MarkPrivateMessagesReadResponse> markPrivateMessagesRead(
             @RequestBody MarkPrivateMessagesReadRequest request,
             @CurrentUser Long userId) {
         try {
+            System.out.println("======================== read =========================");
             MarkPrivateMessagesReadResponse resp = chatMessageService.markPrivateMessagesRead(request, userId);
+            System.out.println("======================== read end =========================");
             return Result.success(resp);
         } catch (IllegalArgumentException e) {
             log.error(e.getMessage());
@@ -79,9 +92,6 @@ public class ChatMessageController {
         }
     }
 
-    /**
-     * 将某个群聊的消息全部标记为已读（当前用户作为接收方）。
-     */
     @PostMapping("/group/markRead")
     public Result<MarkGroupMessagesReadResponse> markGroupMessagesRead(
             @RequestBody MarkGroupMessagesReadRequest request,
@@ -99,7 +109,7 @@ public class ChatMessageController {
     }
 
     /**
-     * 单向删除消息（仅对自己隐藏该条消息）。
+     * 单向删除（仅删除当前用户视角该条消息）
      */
     @PostMapping("/delete")
     public Result<DeleteMessageResponse> deleteMessageForMe(
@@ -114,6 +124,28 @@ public class ChatMessageController {
             return Result.fail(ResultCode.PARAM_ERROR, null);
         } catch (Exception e) {
             log.error("deleteMessageForMe system error", e);
+            return Result.fail(ResultCode.SYSTEM_ERROR, null);
+        }
+    }
+
+    /**
+     * 撤回消息（仅发送者在3分钟内可撤回，删除所有人的该条逻辑消息）
+     */
+    @PostMapping("/recall")
+    public Result<RecallMessageResponse> recallMessage(
+            @RequestBody RecallMessageRequest request,
+            @CurrentUser Long userId) {
+        try {
+            RecallMessageResponse resp = chatMessageService.recallMessage(request, userId);
+            if (!resp.isAllowed()) {
+                return Result.fail(ResultCode.PARAM_ERROR, resp);
+            }
+            return Result.success(resp);
+        } catch (IllegalArgumentException e) {
+            log.warn("recallMessage validation failed userId={} req={} err={}", userId, request, e.getMessage());
+            return Result.fail(ResultCode.PARAM_ERROR, null);
+        } catch (Exception e) {
+            log.error("recallMessage system error", e);
             return Result.fail(ResultCode.SYSTEM_ERROR, null);
         }
     }

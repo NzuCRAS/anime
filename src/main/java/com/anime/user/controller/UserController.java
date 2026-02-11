@@ -7,10 +7,7 @@ import com.anime.auth.utils.JwtCookieUtil;
 import com.anime.auth.web.CurrentUser;
 import com.anime.common.dto.attachment.PresignRequestDTO;
 import com.anime.common.dto.attachment.PresignResponseDTO;
-import com.anime.common.dto.user.AvatarBindDTO;
-import com.anime.common.dto.user.UserInfoDTO;
-import com.anime.common.dto.user.UserLoginDTO;
-import com.anime.common.dto.user.UserRegisterDTO;
+import com.anime.common.dto.user.*;
 import com.anime.common.enums.ResultCode;
 import com.anime.common.result.Result;
 import com.anime.common.service.AttachmentService;
@@ -244,6 +241,37 @@ public class UserController {
         return ResponseEntity.ok(Result.success("已登出"));
     }
 
+    @Operation(summary = "更新个人签名", description = "修改当前登录用户的个人签名（长度上限 200）")
+    @PostMapping("/signature")
+    public ResponseEntity<Result<String>> updateSignature(@CurrentUser Long userId,
+                                                          @RequestBody PersonalSignatureDTO dto) {
+        if (userId == null) {
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode())
+                    .body(Result.fail(ResultCode.UNAUTHORIZED, "未授权"));
+        }
+        if (dto == null) {
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, "请求体不能为空"));
+        }
+        String sig = dto.getPersonalSignature();
+        if (sig == null) sig = "";
+        if (sig.length() > 200) {
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, "personalSignature length must <= 200"));
+        }
+        try {
+            boolean ok = userService.updatePersonalSignature(userId, sig);
+            if (ok) {
+                return ResponseEntity.ok(Result.success("更新签名成功"));
+            } else {
+                return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, "更新失败"));
+            }
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Result.fail(ResultCode.BAD_REQUEST, e.getMessage()));
+        } catch (Exception e) {
+            log.error("updateSignature error userId={} sig={}", userId, sig, e);
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body(Result.fail(ResultCode.SYSTEM_ERROR, "更新签名失败"));
+        }
+    }
+
     @Operation(summary = "获取 presign（用户上传头像 专用）", description = "生成 presigned PUT URL，供前端上传用户头像")
     @PostMapping("/presign")
     public ResponseEntity<?> presign(@RequestBody PresignRequestDTO req, @CurrentUser Long userId) {
@@ -257,6 +285,51 @@ public class UserController {
         } catch (Exception ex) {
             log.error("presign failed", ex);
             return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode()).body("presign failed");
+        }
+    }
+
+    @Operation(summary = "获取当前登录用户信息", description = "根据 access token / refresh cookie 中的用户标识，返回 UserInfoDTO（包含头像 URL、签名等）")
+    @GetMapping("/me")
+    public ResponseEntity<Result<UserInfoDTO>> getCurrentUser(@CurrentUser Long currentUserId) {
+        if (currentUserId == null) {
+            failUserInfoDTO.setUsername("未授权");
+            return ResponseEntity.status(ResultCode.UNAUTHORIZED.getCode())
+                    .body(Result.fail(ResultCode.UNAUTHORIZED, failUserInfoDTO));
+        }
+
+        try {
+            // 先通过 UserService 获取基础信息
+            UserInfoDTO dto = new UserInfoDTO();
+            dto.setId(String.valueOf(currentUserId));
+            try {
+                dto.setUsername(userService.getUsernameById(currentUserId));
+            } catch (Exception ignored) {}
+
+            // avatar
+            try {
+                Long avatarAttachmentId = userService.getAvatarAttachmentId(currentUserId);
+                if (avatarAttachmentId != null) {
+                    try {
+                        String avatarUrl = attachmentService.generatePresignedGetUrl(avatarAttachmentId, 300L);
+                        dto.setUserAvatarUrl(avatarUrl);
+                    } catch (Exception e) {
+                        log.debug("getCurrentUser: presigned url failed for avatar {}: {}", avatarAttachmentId, e.getMessage());
+                        dto.setUserAvatarUrl(null);
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            // signature
+            try {
+                dto.setPersonalSignature(userService.getPersonalSignature(currentUserId));
+            } catch (Exception ignored) {}
+
+            return ResponseEntity.ok(Result.success(dto));
+        } catch (Exception e) {
+            log.error("getCurrentUser error userId={}", currentUserId, e);
+            failUserInfoDTO.setUsername("获取用户信息失败");
+            return ResponseEntity.status(ResultCode.SYSTEM_ERROR.getCode())
+                    .body(Result.fail(ResultCode.SYSTEM_ERROR, failUserInfoDTO));
         }
     }
 

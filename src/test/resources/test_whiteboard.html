@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Whiteboard Test (Fixed, Full)</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        body { font-family: system-ui, -apple-system, Roboto, "Segoe UI", Arial; padding: 12px; }
+        .row { display:flex; gap:12px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+        .col { display:flex; flex-direction:column; gap:8px; }
+        #canvas { border:1px solid #ddd; background:#fff; touch-action: none; width: 960px; height: 540px; display:block; }
+        #log { white-space: pre-wrap; background:#111; color:#eee; padding:8px; height:200px; overflow:auto; font-family: monospace; }
+        input, button, select { padding:6px 8px; font-size:14px; }
+        label { font-size:14px; }
+    </style>
+</head>
+<body>
+<h2>Whiteboard Test Page (Fixed continuity)</h2>
+
+<div class="row">
+    <label>Server Base URL:
+        <input id="serverUrl" value="https://localhost:8443" size="38"/>
+    </label>
+    <label>WS Path:
+        <input id="wsPath" value="/ws/chat" size="16"/>
+    </label>
+</div>
+
+<div class="row">
+    <label>Username:
+        <input id="username" value="1" />
+    </label>
+    <label>Password:
+        <input id="password" type="password" value="1" />
+    </label>
+    <button id="btnLogin">Login</button>
+    <span id="loginStatus">not logged</span>
+</div>
+
+<div class="row">
+    <button id="btnConnect" disabled>Connect WS</button>
+    <span id="wsStatus">ws closed</span>
+</div>
+
+<hr/>
+
+<div class="row">
+    <label>Target UserId (for create): <input id="targetUserId" value="2" size="6"/></label>
+    <button id="btnCreate">Create Whiteboard</button>
+    <button id="btnJoin">Join by boardId</button>
+    <input id="boardIdInput" placeholder="boardId (or blank after create)" size="36"/>
+    <button id="btnLeave">Leave</button>
+</div>
+
+<div class="row">
+    <label>Tool:
+        <select id="tool">
+            <option value="pen">Pen</option>
+            <option value="eraser">Eraser</option>
+        </select>
+    </label>
+    <label>Color: <input id="color" type="color" value="#ff3366"/></label>
+    <label>Width: <input id="width" type="number" value="3" min="1" max="40" style="width:70px"/></label>
+    <button id="btnClear">Clear</button>
+    <button id="btnExport">Export PNG</button>
+</div>
+
+<div class="col">
+    <canvas id="canvas"></canvas>
+    <div id="log"></div>
+</div>
+
+<script>
+    /*
+      whiteboard-test.html (fixed full)
+      - Addresses discontinuity:
+        * Sending: carry-over last point to next batch so batches overlap by 1 point
+        * Receiving: maintain lastPointMap per strokeId and prepend last point when needed
+        * Local rendering: draw connected segments (not isolated dots) and draw dot for single-point strokes
+        * Ensure pointerup flush with isEnd=true
+        * Proper canvas scaling for DPR
+      - Usage: Login -> Connect WS -> Create or Join -> Draw
+    */
+
+    (() => {
+        const $ = id => document.getElementById(id);
+        const logEl = $('log');
+        function log(...args) { logEl.textContent += args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+        let accessToken = null;
+        let ws = null;
+        let boardId = null;
+        let connected = false;
+
+        // Canvas and rendering
+        const canvas = $('canvas');
+        const ctx = canvas.getContext('2d', { alpha: true });
+
+        // set CSS size
+        canvas.style.width = '960px';
+        canvas.style.height = '540px';
+
+        function resizeCanvasToDisplaySize() {
+            const rect = canvas.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            const width = Math.round(rect.width * dpr);
+            const height = Math.round(rect.height * dpr);
+            if (canvas.width !== width || canvas.height !== height) {
+                // preserve content
+                const tmp = document.createElement('canvas');
+                tmp.width = canvas.width || 1;
+                tmp.height = canvas.height || 1;
+                tmp.getContext('2d').drawImage(canvas, 0, 0);
+                canvas.width = width;
+                canvas.height = height;
+                // reset and scale to CSS pixels
+                ctx.setTransform(1,0,0,1,0,0);
+                ctx.scale(dpr, dpr);
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                // redraw old content scaled (if any)
+                ctx.drawImage(tmp, 0, 0, tmp.width / dpr, tmp.height / dpr);
+            }
+        }
+        window.addEventListener('resize', resizeCanvasToDisplaySize);
+        resizeCanvasToDisplaySize();
+
+        function normalizePoint(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (clientX - rect.left) / rect.width;
+            const y = (clientY - rect.top) / rect.height;
+            return [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))];
+        }
+        function denormalizePoint(xNorm, yNorm) {
+            const rect = canvas.getBoundingClientRect();
+            return [xNorm * rect.width, yNorm * rect.height];
+        }
+
+        function drawPointsOnContext(points, color, width, globalComposite = 'source-over') {
+            if (!points || points.length === 0) return;
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.strokeStyle = color || '#000';
+            ctx.lineWidth = width || 2;
+            ctx.globalCompositeOperation = globalComposite;
+
+            if (points.length === 1) {
+                const [x, y] = denormalizePoint(points[0][0], points[0][1]);
+                ctx.beginPath();
+                ctx.arc(x, y, Math.max(1, (width || 2) / 2), 0, Math.PI * 2);
+                ctx.fillStyle = color || '#000';
+                ctx.fill();
+            } else {
+                ctx.beginPath();
+                for (let i = 0; i < points.length; i++) {
+                    const [xNorm, yNorm] = points[i];
+                    const [x, y] = denormalizePoint(xNorm, yNorm);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // Maintain last received point per strokeId to ensure continuity
+        const lastPointMap = {}; // strokeId -> [xNorm, yNorm]
+
+        function applyEvent(ev) {
+            if (!ev || !ev.type) return;
+            if (ev.type === 'WHITEBOARD_STROKE_PART') {
+                const sid = ev.strokeId;
+                let points = Array.isArray(ev.points) ? ev.points.slice() : [];
+                if (points.length === 0) {
+                    // nothing to draw
+                    if (ev.isEnd && sid) delete lastPointMap[sid];
+                    return;
+                }
+                const last = lastPointMap[sid];
+                // If we have a previous last point and first point differs, prepend it for seamless join
+                if (last && (last[0] !== points[0][0] || last[1] !== points[0][1])) {
+                    points.unshift(last);
+                }
+                const composite = (ev.tool === 'eraser') ? 'destination-out' : 'source-over';
+                drawPointsOnContext(points, ev.color || '#000', ev.width || 2, composite);
+                // update last point
+                lastPointMap[sid] = points[points.length - 1];
+                if (ev.isEnd && sid) {
+                    delete lastPointMap[sid];
+                }
+            } else if (ev.type === 'WHITEBOARD_CLEAR') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // clear local lastPoint map as well
+                for (const k in lastPointMap) delete lastPointMap[k];
+            }
+        }
+
+        // WebSocket and signaling
+        function sendSignal(type, payload) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WS not open, cannot send', type);
+                return;
+            }
+            ws.send(JSON.stringify({ type, payload }));
+        }
+
+        async function doLogin() {
+            const server = $('serverUrl').value.replace(/\/+$/, '');
+            const username = $('username').value;
+            const password = $('password').value;
+            try {
+                const res = await fetch(server + '/api/user/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernameOrEmail: username, password })
+                });
+                const body = await res.json().catch(()=>null);
+                if (!res.ok) { log('login failed', res.status, body); $('loginStatus').textContent = 'login failed'; return; }
+                const token = res.headers.get('New-Access-Token') || res.headers.get('new-access-token');
+                accessToken = token;
+                $('loginStatus').textContent = token ? 'logged (token)' : 'logged';
+                $('btnConnect').disabled = false;
+                log('login success; token?', !!token);
+            } catch (e) { log('login error', e.message || e); $('loginStatus').textContent = 'login error'; }
+        }
+
+        function connectWs() {
+            const server = $('serverUrl').value.replace(/\/+$/, '');
+            const path = $('wsPath').value || '/ws/chat';
+            const isHttps = server.startsWith('https://');
+            const host = server.replace(/^https?:\/\//, '');
+            const url = (isHttps ? 'wss://' : 'ws://') + host + path + (accessToken ? '?token=' + encodeURIComponent(accessToken) : '');
+            log('connecting ws', url);
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                log('WS open');
+                connected = true;
+                $('wsStatus').textContent = 'ws open';
+            };
+
+            ws.onmessage = (ev) => {
+                try {
+                    const env = JSON.parse(ev.data);
+                    if (env.type === 'WHITEBOARD_CREATED') {
+                        boardId = env.payload?.boardId;
+                        $('boardIdInput').value = boardId;
+                        log('board created', boardId);
+                    } else if (env.type === 'WHITEBOARD_INIT') {
+                        boardId = env.payload?.boardId;
+                        $('boardIdInput').value = boardId;
+                        const events = env.payload?.events || [];
+                        log('WHITEBOARD_INIT events:', events.length);
+                        // clear and replay events
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                        // reset lastPointMap
+                        for (const k in lastPointMap) delete lastPointMap[k];
+                        events.forEach(e => applyEvent(e));
+                    } else if (env.type === 'WHITEBOARD_EVENT') {
+                        // server forwards events individually
+                        const evp = env.payload;
+                        applyEvent(evp);
+                    } else if (env.type === 'WHITEBOARD_CLEAR') {
+                        // some code paths might forward clear as top-level type
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                        for (const k in lastPointMap) delete lastPointMap[k];
+                        log('canvas cleared by peer');
+                    } else if (env.type === 'WHITEBOARD_ERROR') {
+                        log('WHITEBOARD_ERROR', env.payload);
+                    } else {
+                        // ignore other events
+                    }
+                } catch (e) {
+                    log('ws message parse error', e);
+                }
+            };
+
+            ws.onclose = (ev) => {
+                log('WS closed', ev.code, ev.reason);
+                connected = false;
+                $('wsStatus').textContent = 'ws closed';
+            };
+
+            ws.onerror = (err) => { log('WS error', err && (err.message || err)); };
+        }
+
+        function createBoard() {
+            const target = Number($('targetUserId').value);
+            if (!target) { alert('provide targetUserId'); return; }
+            sendSignal('WHITEBOARD_CREATE', { targetUserId: target });
+        }
+
+        function joinBoardByInput() {
+            const bid = $('boardIdInput').value.trim();
+            if (!bid) { alert('boardId required'); return; }
+            boardId = bid;
+            sendSignal('WHITEBOARD_JOIN', { boardId });
+            log('sent WHITEBOARD_JOIN boardId=' + boardId);
+        }
+
+        function leaveBoard() {
+            boardId = null;
+            $('boardIdInput').value = '';
+            log('left board');
+        }
+
+        function clearBoard() {
+            if (!boardId) { alert('join or create board first'); return; }
+            sendSignal('WHITEBOARD_CLEAR', { boardId, ts: Date.now() });
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            for (const k in lastPointMap) delete lastPointMap[k];
+            log('sent WHITEBOARD_CLEAR');
+        }
+
+        function exportPng() {
+            const data = canvas.toDataURL('image/png');
+            const w = window.open('', '_blank');
+            if (w) w.document.write(`<img src="${data}" />`);
+            else {
+                const a = document.createElement('a');
+                a.href = data;
+                a.download = (boardId ? ('whiteboard-' + boardId) : 'whiteboard') + '.png';
+                a.click();
+            }
+        }
+
+        // Sending batching with carry-over to avoid gaps
+        let drawing = false;
+        let currentStrokeId = null;
+        let sendBuffer = []; // points not yet sent (normalized)
+        let carryPoint = null; // last point sent (normalized), used as overlap for next batch
+        let sendTimer = null;
+        const BATCH_MAX_POINTS = 12;
+        const BATCH_INTERVAL_MS = 60;
+
+        function flushBuffer(isEnd = false) {
+            if (!boardId) return;
+            if (sendBuffer.length === 0 && !isEnd) return;
+
+            // Build pointsToSend with carry-over at head if necessary
+            let pointsToSend = sendBuffer.slice();
+            if (carryPoint && pointsToSend.length > 0) {
+                const first = pointsToSend[0];
+                if (first[0] !== carryPoint[0] || first[1] !== carryPoint[1]) {
+                    pointsToSend.unshift(carryPoint);
+                }
+            }
+
+            const payload = {
+                boardId,
+                strokeId: currentStrokeId,
+                tool: $('tool').value,
+                color: $('color').value,
+                width: Number($('width').value) || 2,
+                points: pointsToSend,
+                isEnd: !!isEnd,
+                ts: Date.now()
+            };
+
+            sendSignal('WHITEBOARD_STROKE_PART', payload);
+
+            // Update carryPoint -> last point of pointsToSend (if any)
+            if (pointsToSend.length > 0) {
+                carryPoint = pointsToSend[pointsToSend.length - 1];
+                // keep carryPoint in buffer as first point for continuity, but clear others
+                sendBuffer = carryPoint ? [carryPoint] : [];
+            } else {
+                sendBuffer = [];
+                carryPoint = null;
+            }
+
+            if (isEnd) {
+                // end of stroke -> clear carry/ buffer
+                carryPoint = null;
+                sendBuffer = [];
+            }
+        }
+
+        function startSendingTimer() {
+            if (sendTimer) return;
+            sendTimer = setInterval(() => { flushBuffer(false); }, BATCH_INTERVAL_MS);
+        }
+        function stopSendingTimer() { if (sendTimer) { clearInterval(sendTimer); sendTimer = null; } }
+
+        // Local continuity: track last local point per stroke to draw continuous line locally
+        let lastLocalPoint = null;
+
+        function renderLocalPoints(points, tool, color, width, isEnd) {
+            if (!points || points.length === 0) return;
+            const composite = (tool === 'eraser') ? 'destination-out' : 'source-over';
+            // If there is a previous local point that's different from first, prepend it to keep continuity
+            let pts = points.slice();
+            if (lastLocalPoint && (lastLocalPoint[0] !== pts[0][0] || lastLocalPoint[1] !== pts[0][1])) {
+                pts.unshift(lastLocalPoint);
+            }
+            drawPointsOnContext(pts, color, width, composite);
+            lastLocalPoint = pts[pts.length - 1];
+            if (isEnd) lastLocalPoint = null;
+        }
+
+        function onPointerDown(e) {
+            resizeCanvasToDisplaySize(); // ensure correct mapping
+            if (!boardId) { alert('Please create or join a board first'); return; }
+            drawing = true;
+            currentStrokeId = crypto.randomUUID ? crypto.randomUUID() : ('s-' + Date.now() + '-' + Math.floor(Math.random()*10000));
+            sendBuffer = [];
+            carryPoint = null;
+            lastLocalPoint = null;
+            startSendingTimer();
+            const [nx, ny] = normalizePoint(e.clientX, e.clientY);
+            sendBuffer.push([nx, ny]);
+            // draw immediately locally (for responsiveness)
+            renderLocalPoints([[nx, ny]], $('tool').value, $('color').value, Number($('width').value) || 2, false);
+            e.preventDefault();
+        }
+
+        function onPointerMove(e) {
+            if (!drawing) return;
+            const [nx, ny] = normalizePoint(e.clientX, e.clientY);
+            sendBuffer.push([nx, ny]);
+            // locally render the incremental point
+            renderLocalPoints([[nx, ny]], $('tool').value, $('color').value, Number($('width').value) || 2, false);
+            if (sendBuffer.length >= BATCH_MAX_POINTS) flushBuffer(false);
+            e.preventDefault();
+        }
+
+        function onPointerUp(e) {
+            if (!drawing) return;
+            drawing = false;
+            const [nx, ny] = normalizePoint(e.clientX, e.clientY);
+            sendBuffer.push([nx, ny]);
+            // flush final with isEnd=true
+            flushBuffer(true);
+            stopSendingTimer();
+            currentStrokeId = null;
+            lastLocalPoint = null;
+            e.preventDefault();
+        }
+
+        // Wire DOM
+        $('btnLogin').onclick = doLogin;
+        $('btnConnect').onclick = connectWs;
+        $('btnCreate').onclick = createBoard;
+        $('btnJoin').onclick = joinBoardByInput;
+        $('btnLeave').onclick = leaveBoard;
+        $('btnClear').onclick = clearBoard;
+        $('btnExport').onclick = exportPng;
+
+        canvas.addEventListener('pointerdown', onPointerDown);
+        canvas.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+
+        // Helpful initial notes
+        log('Loaded. Sequence: Login -> Connect WS -> Create or Join board -> Draw.');
+        log('Local continuity fixed: batches overlap by one point; receiver prepends last point for smooth join.');
+    })();
+</script>
+</body>
+</html>

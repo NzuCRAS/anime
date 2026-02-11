@@ -7,6 +7,7 @@ import com.anime.common.entity.chat.UserFriend;
 import com.anime.common.entity.chat.UserFriendRequest;
 import com.anime.common.entity.user.User;
 import com.anime.common.enums.SocketType;
+import com.anime.common.enums.FriendStatus;
 import com.anime.common.mapper.chat.UserFriendMapper;
 import com.anime.common.mapper.chat.UserFriendRequestMapper;
 import com.anime.common.mapper.user.UserMapper;
@@ -120,19 +121,19 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
         final Long reqId = fr.getId();
         final Long fromUserId = currentUserId;
         final Long targetId = toUserId;
-        final String msg = message;
+        final String msg = message == null ? "" : message;
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
                 try {
-                    var payload = java.util.Map.of(
+                    var payload = Map.of(
                             "requestId", reqId,
                             "fromUserId", fromUserId,
                             "message", msg
                     );
                     wsEventPublisher.sendToUser(targetId, SocketType.NEW_FRIEND_REQUEST.toString(), payload);
                 } catch (Exception e) {
-                    log.warn("notify NEW_FRIEND_REQUEST failed for targetId={} reqId={} err={}", targetId, reqId, e.getMessage());
+                    log.error("notify NEW_FRIEND_REQUEST failed for targetId={} reqId={} err={}", targetId, reqId, e.getMessage());
                 }
             }
         });
@@ -145,6 +146,8 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
 
     /**
      * 列出当前用户收到的好友请求（pending）
+     *
+     * 新增：把发起人的个性签名（signature）包含在返回项中
      */
     public ListFriendRequestsResponse listIncomingRequests(Long currentUserId) {
         List<UserFriendRequest> list = userFriendRequestMapper.listPendingForUser(currentUserId);
@@ -161,6 +164,9 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
                 }
                 it.setMessage(fr.getMessage());
                 it.setCreatedAt(fr.getCreatedAt());
+                // 新增：设置发起人的个性签名（signature）
+                String signature = userMapper.getPersonalSignatureById(fromUser.getId());
+                it.setSignature(signature);
             }
             return it;
         }).collect(Collectors.toList());
@@ -257,9 +263,9 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
     }
 
     /**
-     * 精确id搜索（严格匹配）
+     * 精确id搜索（严格匹配） - now includes relationship status relative to currentUserId
      */
-    public SearchUserResponse searchById(SearchUserRequest req) {
+    public SearchUserResponse searchById(SearchUserRequest req, Long currentUserId) {
         if (req == null || req.getUserId() == null || req.getUserId() <= 0) {
             SearchUserResponse r = new SearchUserResponse();
             r.setItems(List.of());
@@ -279,6 +285,35 @@ public class FriendService extends ServiceImpl<UserFriendMapper, UserFriend> {
             it.setAvatarUrl(attachmentService.generatePresignedGetUrl(avatarId, 300));
         }
         it.setPersonalSignature(userMapper.getPersonalSignatureById(u.getId()));
+
+        // Determine relation status relative to currentUserId
+        FriendStatus status = FriendStatus.NOT_FRIENDS;
+        if (currentUserId != null) {
+            // 1) check friendship (either direction should be present as we create two rows on accept)
+            long count = this.count(Wrappers.<UserFriend>lambdaQuery()
+                    .eq(UserFriend::getUserId, currentUserId)
+                    .eq(UserFriend::getFriendId, u.getId()));
+            if (count > 0) {
+                status = FriendStatus.ALREADY_FRIENDS;
+            } else {
+                // 2) check pending friend request in either direction
+                UserFriendRequest sent = userFriendRequestMapper.findByFromTo(currentUserId, u.getId());
+                if (sent != null && "pending".equalsIgnoreCase(sent.getStatus())) {
+                    status = FriendStatus.PENDING_REQUEST;
+                } else {
+                    UserFriendRequest received = userFriendRequestMapper.findByFromTo(u.getId(), currentUserId);
+                    if (received != null && "pending".equalsIgnoreCase(received.getStatus())) {
+                        status = FriendStatus.PENDING_REQUEST;
+                    } else {
+                        status = FriendStatus.NOT_FRIENDS;
+                    }
+                }
+            }
+        } else {
+            status = FriendStatus.NOT_FRIENDS;
+        }
+        it.setStatus(status);
+
         resp.setItems(List.of(it));
         return resp;
     }

@@ -264,6 +264,27 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessage> {
     Long countGroupUnread(@Param("groupId") Long groupId,
                           @Param("currentUserId") Long currentUserId);
 
+    /**
+     * 撤回：根据逻辑消息ID，批量逻辑删除该逻辑消息下的所有记录
+     */
+    @Update("""
+        UPDATE chat_messages
+        SET deleted_at = NOW()
+        WHERE logic_message_id = #{logicMessageId}
+          AND deleted_at IS NULL
+        """)
+    int recallByLogicId(@Param("logicMessageId") Long logicMessageId);
+
+    /**
+     * 找到该逻辑消息涉及到的所有用户（以各记录的 to_user_id 为准，包含发送者自己的视角记录）
+     */
+    @Select("""
+        SELECT DISTINCT to_user_id
+        FROM chat_messages
+        WHERE logic_message_id = #{logicMessageId}
+        """)
+    List<Long> listRecipientsByLogicId(@Param("logicMessageId") Long logicMessageId);
+
     interface GroupUnreadCountRow {
         Long getGroupId();
         Long getUnreadCount();

@@ -55,4 +55,9 @@ public class SessionItem {
      * - 群聊：群头像 URL（可选）
      */
     private String avatarUrl;
+
+    /**
+     * 用户是否在线
+     */
+    private boolean isOnline;
 }

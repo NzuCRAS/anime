@@ -36,8 +36,8 @@ public class ChatSessionController {
             @CurrentUser Long userId) {
         try {
             ListSessionsResponse resp = chatSessionService.listSessions(userId);
-            log.error("===========================session list==============================");
-            log.error(resp.toString());
+            log.info("===========================session list==============================");
+            log.info(resp.toString());
             return Result.success(resp);
         } catch (IllegalArgumentException e) {
             log.error(e.getMessage());

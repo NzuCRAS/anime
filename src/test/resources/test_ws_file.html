@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Chat WS 测试页</title>
+    <style>
+        body { font-family: Arial, Helvetica, sans-serif; margin: 16px; }
+        .box { border: 1px solid #ddd; padding: 12px; margin-bottom: 12px; border-radius: 6px; }
+        label { display:block; margin-top:8px; }
+        input[type=text], input[type=password], textarea { width:100%; box-sizing: border-box; padding:8px; margin-top:4px; }
+        button { margin-top:8px; padding:8px 12px; }
+        #log { height: 320px; overflow:auto; background:#111; color:#bff; padding:8px; font-family: monospace; white-space: pre-wrap;}
+        .small { font-size:0.9em; color:#666 }
+    </style>
+</head>
+<body>
+
+<h2>Chat WebSocket 简易测试页</h2>
+
+<div class="box" id="cfg">
+    <div class="small">请根据你的服务地址调整下面的 BASE_URL 与 WS_PATH（默认假定后端部署在与页面同 host/port）。</div>
+    <label>REST 后端 BASE_URL:
+        <input type="text" id="baseUrl" value="https://localhost:8443" />
+    </label>
+    <label>WebSocket 路径（不包含 token 参数）:
+        <input type="text" id="wsPath" value="/ws/chat" />
+    </label>
+    <div class="small">如果你的 ws 路径不同（例如 /ws 或 /socket），请修改。</div>
+</div>
+
+<div class="box" id="loginBox">
+    <h3>登录</h3>
+    <label>用户名或邮箱:
+        <input type="text" id="loginUser" value="testuser" />
+    </label>
+    <label>密码:
+        <input type="password" id="loginPass" value="password"/>
+    </label>
+    <button id="btnLogin">Login</button>
+    <div class="small">登录后会尝试读取响应头 "New-Access-Token" 作为 access token。</div>
+    <div id="loginResult" class="small"></div>
+</div>
+
+<div class="box" id="wsBox">
+    <h3>WebSocket</h3>
+    <div>
+        <button id="btnConnect">Connect WebSocket</button>
+        <button id="btnDisconnect" disabled>Disconnect</button>
+        <span class="small"> token 显示于下方（登录后自动填充）</span>
+    </div>
+    <label>Token:
+        <input type="text" id="accessToken" />
+    </label>
+    <label>当前用户 ID (从登录返回或你自己填写):
+        <input type="text" id="currentUserId" />
+    </label>
+</div>
+
+<div class="box" id="sendBox">
+    <h3>发送消息（通过 WS）</h3>
+    <label>会话类型:
+        <select id="convType">
+            <option value="PRIVATE">PRIVATE</option>
+            <option value="GROUP">GROUP</option>
+        </select>
+    </label>
+    <label>目标 userId / groupId (targetUserId 或 groupId):
+        <input type="text" id="targetId" placeholder="目标 userId 或 groupId"/>
+    </label>
+    <label>消息类型:
+        <select id="messageType">
+            <option value="TEXT">TEXT</option>
+            <option value="IMAGE">IMAGE</option>
+            <option value="FILE">FILE</option>
+        </select>
+    </label>
+    <label>文本内容:
+        <textarea id="msgContent" rows="3">Hello from web test</textarea>
+    </label>
+    <label>attachmentId (可选，测试文件消息):
+        <input type="text" id="attachmentId" placeholder="12345"/>
+    </label>
+    <label>clientMessageId (可选，用于幂等):
+        <input type="text" id="clientMessageId" placeholder="uuid-client-id"/>
+    </label>
+    <button id="btnSend">Send Message</button>
+</div>
+
+<div class="box">
+    <h3>Incoming messages / Events</h3>
+    <div id="log"></div>
+</div>
+
+<script>
+    (function(){
+        const btnLogin = document.getElementById('btnLogin');
+        const btnConnect = document.getElementById('btnConnect');
+        const btnDisconnect = document.getElementById('btnDisconnect');
+        const btnSend = document.getElementById('btnSend');
+        const logEl = document.getElementById('log');
+
+        function log(...args){
+            const time = new Date().toLocaleTimeString();
+            logEl.textContent = time + '  ' + args.map(a => (typeof a === 'string'? a : JSON.stringify(a))).join(' ') + '\n' + logEl.textContent;
+        }
+
+        // helper to get config
+        function getCfg(){ return { baseUrl: document.getElementById('baseUrl').value.trim(), wsPath: document.getElementById('wsPath').value.trim() }; }
+
+        // LOGIN
+        btnLogin.addEventListener('click', async () => {
+            const base = getCfg().baseUrl;
+            const user = document.getElementById('loginUser').value;
+            const pass = document.getElementById('loginPass').value;
+            if(!user || !pass){ alert('请输入用户名/密码'); return; }
+            try {
+                const resp = await fetch(base + '/api/user/login', {
+                    method: 'POST',
+                    credentials: 'include', // to receive cookies if any
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernameOrEmail: user, password: pass })
+                });
+                const text = await resp.text();
+                let json = null;
+                try { json = JSON.parse(text); } catch(e) { json = text; }
+                const newToken = resp.headers.get('New-Access-Token') || resp.headers.get('new-access-token');
+                if(newToken){
+                    document.getElementById('accessToken').value = newToken;
+                }
+                // try to extract user id from response body if present (Result<UserInfoDTO>)
+                if (json && typeof json === 'object') {
+                    if (json.data && json.data.id) {
+                        document.getElementById('currentUserId').value = json.data.id;
+                    } else if (json.id) {
+                        document.getElementById('currentUserId').value = json.id;
+                    }
+                }
+                log('LOGIN resp status=' + resp.status, json || text, 'New-Access-Token=' + !!newToken);
+                document.getElementById('loginResult').textContent = 'status=' + resp.status + (newToken ? ' token obtained' : '');
+            } catch (e) {
+                log('LOGIN error', e.message || e);
+                document.getElementById('loginResult').textContent = 'error: ' + (e.message || e);
+            }
+        });
+
+        // WEBSOCKET
+        let ws = null;
+        btnConnect.addEventListener('click', () => {
+            if(ws && ws.readyState === WebSocket.OPEN){
+                log('WebSocket 已连接'); return;
+            }
+            const cfg = getCfg();
+            const token = document.getElementById('accessToken').value.trim();
+            if(!token){ if(!confirm('没有 token，要继续用匿名连接吗？')) return; }
+            // build wss/ws url based on page protocol and baseUrl if set
+            let wsUrl;
+            if(cfg.baseUrl && cfg.baseUrl.startsWith('http')) {
+                try {
+                    const u = new URL(cfg.baseUrl);
+                    const proto = u.protocol === 'https:' ? 'wss' : 'ws';
+                    wsUrl = proto + '://' + u.host + cfg.wsPath + (token ? ('?token=' + encodeURIComponent(token)) : '');
+                } catch(e){
+                    log('invalid base URL'); return;
+                }
+            } else {
+                // fallback to current origin
+                const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+                wsUrl = proto + '://' + location.host + cfg.wsPath + (token ? ('?token=' + encodeURIComponent(token)) : '');
+            }
+
+            log('Connecting to', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('WS OPEN');
+                btnConnect.disabled = true;
+                btnDisconnect.disabled = false;
+            };
+            ws.onclose = (ev) => {
+                log('WS CLOSE', ev.code, ev.reason);
+                btnConnect.disabled = false;
+                btnDisconnect.disabled = true;
+            };
+            ws.onerror = (ev) => {
+                log('WS ERROR', ev);
+            };
+            ws.onmessage = (ev) => {
+                try {
+                    const obj = JSON.parse(ev.data);
+                    log('WS MSG', obj);
+                } catch(e) {
+                    log('WS RAW', ev.data);
+                }
+            };
+        });
+
+        btnDisconnect.addEventListener('click', () => {
+            if(ws){ ws.close(); ws = null; btnDisconnect.disabled = true; btnConnect.disabled = false; log('WS -> close requested'); }
+        });
+
+        // SEND message envelope format:
+        // { type: "SEND_MESSAGE", payload: { conversationType, messageType, targetUserId, groupId, content, attachmentId, clientMessageId } }
+        btnSend.addEventListener('click', () => {
+            if(!ws || ws.readyState !== WebSocket.OPEN){ alert('WebSocket 未连接'); return; }
+            const convType = document.getElementById('convType').value;
+            const target = document.getElementById('targetId').value.trim();
+            const msgType = document.getElementById('messageType').value;
+            const content = document.getElementById('msgContent').value;
+            const attachmentId = (document.getElementById('attachmentId').value || '').trim() || null;
+            const clientMessageId = (document.getElementById('clientMessageId').value || '').trim() || null;
+
+            const payload = {
+                conversationType: convType,
+                messageType: msgType,
+                content: content,
+                clientMessageId: clientMessageId || undefined
+            };
+            if(convType === 'PRIVATE') {
+                payload.targetUserId = target ? Number(target) : null;
+            } else {
+                payload.groupId = target ? Number(target) : null;
+            }
+            if (attachmentId) {
+                // try parse to number
+                const a = Number(attachmentId);
+                payload.attachmentId = Number.isNaN(a) ? attachmentId : a;
+            }
+
+            const envelope = { type: 'SEND_MESSAGE', payload: payload };
+            try {
+                ws.send(JSON.stringify(envelope));
+                log('WS SENT', envelope);
+            } catch(e) {
+                log('WS send error', e.message || e);
+            }
+        });
+
+        // helper: generate a clientMessageId
+        window.generateClientId = function() {
+            const s4 = () => Math.floor((1+Math.random())*0x10000).toString(16).substring(1);
+            return (s4()+s4()+"-"+s4()+"-"+s4()+"-"+s4()+"-"+s4()+s4()+s4());
+        };
+
+        // populate a sample clientMessageId
+        document.getElementById('clientMessageId').value = generateClientId();
+
+        // small convenience: auto-login? disabled by default
+        // document.getElementById('btnLogin').click();
+
+    })();
+</script>
+
+</body>
+</html>

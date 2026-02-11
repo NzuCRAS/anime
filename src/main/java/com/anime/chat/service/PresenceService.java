@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -64,7 +65,7 @@ public class PresenceService {
                 // payload 可随需要扩展（这里使用最简单的 { userId }）
                 var payload = java.util.Map.of("userId", userId);
                 wsEventPublisher.sendToUser(l.getFriendId(), SocketType.USER_ONLINE.toString(), payload);
-                log.error("广播 userId={} 在线给 friendId={}", userId, l.getFriendId());
+                log.info("广播 userId={} 在线给 friendId={}", userId, l.getFriendId());
             }
             log.info("PresenceService: broadcast USER_ONLINE for user={} to {} friends", userId, links.size());
         } catch (Exception e) {
@@ -94,9 +95,9 @@ public class PresenceService {
             }
             for (UserFriend l : links) {
                 if (l == null || l.getFriendId() == null) continue;
-                var payload = java.util.Map.of("userId", userId);
+                var payload = Map.of("userId", userId);
                 wsEventPublisher.sendToUser(l.getFriendId(), SocketType.USER_OFFLINE.toString(), payload);
-                log.error("广播 userId={} 离线给 friendId={}", userId, l.getFriendId());
+                log.info("广播 userId={} 离线给 friendId={}", userId, l.getFriendId());
             }
             log.info("PresenceService: broadcast USER_OFFLINE for user={} to {} friends", userId, links.size());
         } catch (Exception e) {
