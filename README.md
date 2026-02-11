@@ -1,4 +1,4 @@
-# Anime - Blue Archive Community Backend
+# Anime - Blue Archive Community Backend 一个ACGN向的个人收藏网站
 
 <div align="center">
 
